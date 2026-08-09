@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TeddyRemote – TLS-MQTT-Server konfigurieren</title>
+  <style>
+    :root { color-scheme: light dark; --accent:#20bff3; --panel:#0d2943; --border:#55738e; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:16px/1.55 system-ui,-apple-system,sans-serif; background:#00182f; color:#edf7ff; }
+    main { width:min(900px,calc(100% - 32px)); margin:32px auto 64px; }
+    h1 { font-size:clamp(2rem,6vw,3.4rem); line-height:1.05; margin:0 0 12px; }
+    h2 { margin-top:38px; }
+    p,li { color:#c9dceb; }
+    .lead { font-size:1.15rem; }
+    .notice { padding:16px 18px; border:1px solid var(--border); border-radius:16px; background:var(--panel); }
+    .warning { border-color:#e7a13b; }
+    code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    pre { overflow:auto; padding:18px; border-radius:16px; background:#071522; border:1px solid #294a65; color:#d8f6ff; }
+    table { width:100%; border-collapse:collapse; overflow:hidden; border-radius:14px; background:var(--panel); }
+    th,td { padding:12px; border-bottom:1px solid #294a65; text-align:left; vertical-align:top; }
+    th { color:#fff; }
+    .step { color:var(--accent); font-weight:700; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Kleinen TLS-MQTT-Server für TeddyCloud einrichten</h1>
+  <p class="lead">Diese Anleitung installiert Mosquitto als dauerhaften MQTT-Broker:</p>
+  <ul>
+    <li>TLS auf Port <code>1883</code></li>
+    <li>Benutzername und Passwort</li>
+    <li>keine Traffic-Logs</li>
+    <li>persistente Retained Messages und MQTT-Sitzungen</li>
+    <li>verwendbar durch TeddyCloud und Android-Apps</li>
+  </ul>
+  <div class="notice"><strong>Vorbereitung:</strong> Die neutrale Beispieladresse <code>192.168.1.100</code> muss durch die tatsächliche IP des eigenen Docker-Hosts ersetzt werden.</div>
+
+  <h2><span class="step">1.</span> Verzeichnisse anlegen</h2>
+  <pre><code>cd /home/teddycloud/teddycloud-yml
+sudo mkdir -p mosquitto/certs
+sudo nano mosquitto/mosquitto.conf</code></pre>
+
+  <h2><span class="step">2.</span> Mosquitto konfigurieren</h2>
+  <p>Inhalt von <code>mosquitto/mosquitto.conf</code>:</p>
+  <pre><code>listener 1883 0.0.0.0
+protocol mqtt
+
+allow_anonymous false
+password_file /mosquitto/config/passwords
+
+certfile /mosquitto/certs/server.crt
+keyfile /mosquitto/certs/server.key
+require_certificate false
+
+persistence true
+persistence_location /mosquitto/data/
+persistence_file mosquitto.db
+
+log_dest none
+connection_messages false</code></pre>
+
+  <h2><span class="step">3.</span> MQTT-Benutzer erzeugen</h2>
+  <pre><code>cd /home/teddycloud/teddycloud-yml
+sudo touch mosquitto/passwords
+
+sudo docker run --rm -it \
+  --user 0:0 \
+  --entrypoint mosquitto_passwd \
+  -v "$PWD/mosquitto:/mosquitto/config" \
+  eclipse-mosquitto:2.1.2-alpine \
+  -c /mosquitto/config/passwords teddycloud</code></pre>
+  <p><code>teddycloud</code> ist der frei wählbare MQTT-Benutzername. Das Passwort wird interaktiv abgefragt.</p>
+
+  <h2><span class="step">4.</span> TLS-Zertifikate erzeugen</h2>
+  <pre><code>cd /home/teddycloud/teddycloud-yml
+
+sudo openssl req \
+  -x509 -newkey rsa:4096 -nodes -sha256 -days 3650 \
+  -subj "/CN=Local MQTT CA" \
+  -keyout mosquitto/certs/ca.key \
+  -out mosquitto/certs/ca.crt
+
+sudo openssl req \
+  -new -newkey rsa:2048 -nodes -sha256 \
+  -subj "/CN=mosquitto" \
+  -keyout mosquitto/certs/server.key \
+  -out mosquitto/certs/server.csr
+
+sudo tee mosquitto/certs/server.ext &gt;/dev/null &lt;&lt;'EOF'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:mosquitto,IP:192.168.1.100
+EOF
+
+sudo openssl x509 \
+  -req -sha256 -days 825 \
+  -in mosquitto/certs/server.csr \
+  -CA mosquitto/certs/ca.crt \
+  -CAkey mosquitto/certs/ca.key \
+  -CAcreateserial \
+  -extfile mosquitto/certs/server.ext \
+  -out mosquitto/certs/server.crt
+
+sudo rm mosquitto/certs/server.csr mosquitto/certs/server.ext
+
+sudo chown 1883:1883 \
+  mosquitto/passwords \
+  mosquitto/certs/server.key \
+  mosquitto/certs/server.crt
+
+sudo chmod 600 \
+  mosquitto/passwords \
+  mosquitto/certs/server.key \
+  mosquitto/certs/ca.key
+
+sudo chmod 644 \
+  mosquitto/mosquitto.conf \
+  mosquitto/certs/server.crt \
+  mosquitto/certs/ca.crt</code></pre>
+
+  <h2><span class="step">5.</span> Compose ergänzen</h2>
+  <p>In <code>docker-compose.github.yaml</code> ergänzen. Port <code>1883</code> darf nur bei Mosquitto veröffentlicht werden:</p>
+  <pre><code>services:
+  teddycloud:
+    volumes:
+      - ./mosquitto/certs/ca.crt:/teddycloud/config/mosquitto-ca.crt:ro
+
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/passwords:/mosquitto/config/passwords:ro
+      - ./mosquitto/certs/server.crt:/mosquitto/certs/server.crt:ro
+      - ./mosquitto/certs/server.key:/mosquitto/certs/server.key:ro
+      - mosquitto_data:/mosquitto/data
+
+volumes:
+  mosquitto_data:</code></pre>
+
+  <h2><span class="step">6.</span> Broker starten</h2>
+  <pre><code>cd /home/teddycloud/teddycloud-yml
+
+PROJECT="$(sudo docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' teddycloud)"
+
+sudo docker compose \
+  -p "$PROJECT" \
+  -f docker-compose.yaml \
+  -f docker-compose.github.yaml \
+  up -d --no-deps mosquitto
+
+sudo docker port mosquitto</code></pre>
+  <p>Erwartet:</p>
+  <pre><code>1883/tcp -&gt; 0.0.0.0:1883</code></pre>
+
+  <h2><span class="step">7.</span> TeddyCloud einstellen</h2>
+  <table>
+    <tr><th>Einstellung</th><th>Wert</th></tr>
+    <tr><td>MQTT aktivieren</td><td>EIN</td></tr>
+    <tr><td>MQTT-Hostname</td><td><code>mosquitto</code></td></tr>
+    <tr><td>MQTT-Port</td><td><code>1883</code></td></tr>
+    <tr><td>Benutzername</td><td><code>teddycloud</code></td></tr>
+    <tr><td>Passwort</td><td>zuvor vergebenes Passwort</td></tr>
+    <tr><td>TLS aktivieren</td><td>EIN</td></tr>
+    <tr><td>CA-Zertifikat</td><td><code>config/mosquitto-ca.crt</code></td></tr>
+    <tr><td>Überprüfung überspringen</td><td>AUS</td></tr>
+  </table>
+
+  <h2><span class="step">8.</span> Android-App verbinden</h2>
+  <table>
+    <tr><th>Feld</th><th>Wert</th></tr>
+    <tr><td>Host</td><td><code>192.168.1.100</code> (durch eigene Docker-Host-IP ersetzen)</td></tr>
+    <tr><td>Port</td><td><code>1883</code></td></tr>
+    <tr><td>TLS/SSL</td><td>EIN</td></tr>
+    <tr><td>Benutzername</td><td><code>teddycloud</code></td></tr>
+    <tr><td>Passwort</td><td>zuvor vergebenes Passwort</td></tr>
+    <tr><td>CA-Zertifikat</td><td><code>ca.crt</code></td></tr>
+  </table>
+  <p>Die CA-Datei liegt unter:</p>
+  <pre><code>/home/teddycloud/teddycloud-yml/mosquitto/certs/ca.crt</code></pre>
+  <div class="notice">
+    <strong>TeddyRemote:</strong> Die aktuelle App bestätigt beim Verbindungstest den SHA-256-Fingerprint des unbekannten Brokerzertifikats und speichert diesen im Profil. Android-Clients mit CA-Import verwenden stattdessen die oben genannte <code>ca.crt</code>.
+  </div>
+  <p>Für TeddyCloud-Nachrichten kann die App anschließend dieses Topic abonnieren:</p>
+  <pre><code>teddyCloud/#</code></pre>
+
+  <div class="notice warning">
+    <strong>Sicherheit:</strong> Port <code>1883</code> verwendet in diesem Aufbau TLS. Den Broker nicht ungeschützt ins Internet veröffentlichen.
+  </div>
+</main>
+</body>
+</html>

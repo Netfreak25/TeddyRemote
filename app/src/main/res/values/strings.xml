@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TeddyRemote</string>
+    <string name="service_channel_name">TeddyRemote Mediensteuerung</string>
+    <string name="service_channel_description">Fernsteuerung verbundener Toniebox 2</string>
+    <string name="service_connected">Mit TeddyCloud verbunden</string>
+    <string name="service_waiting">TeddyRemote wartet auf Boxen</string>
+</resources>
