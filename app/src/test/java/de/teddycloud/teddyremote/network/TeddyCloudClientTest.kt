@@ -85,6 +85,27 @@ class TeddyCloudClientTest {
     }
 
     @Test
+    fun `reads and updates bedtime ring brightness`() = runTest {
+        server.enqueue(MockResponse().setBody("75"))
+        server.enqueue(MockResponse().setBody("ok"))
+
+        assertEquals(75, client.getBedtimeRingBrightness("D4594404DEAC"))
+        client.setBedtimeRingBrightness("D4594404DEAC", 42)
+
+        assertEquals(
+            "/api/settings/get/toniebox2.bedtime_lightring_brightness?overlay=D4594404DEAC",
+            server.takeRequest().path,
+        )
+        server.takeRequest().let { request ->
+            assertEquals(
+                "/api/settings/set/toniebox2.bedtime_lightring_brightness?overlay=D4594404DEAC",
+                request.path,
+            )
+            assertEquals("42", request.body.readUtf8())
+        }
+    }
+
+    @Test
     fun `parses playlist and title from tag info`() = runTest {
         server.enqueue(
             MockResponse().setBody(

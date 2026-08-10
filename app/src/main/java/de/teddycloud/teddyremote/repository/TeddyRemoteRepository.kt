@@ -215,6 +215,15 @@ class TeddyRemoteRepository(
     suspend fun setRingBrightness(boxId: String, brightness: Int) {
         issueCommand(boxId, "brightness") { client ->
             client.setRingBrightness(boxId, brightness)
+            updateBox(boxId) { it.copy(ringBrightness = brightness.coerceIn(0, 100)) }
+            null
+        }
+    }
+
+    suspend fun setBedtimeRingBrightness(boxId: String, brightness: Int) {
+        issueCommand(boxId, "bedtime:brightness") { client ->
+            client.setBedtimeRingBrightness(boxId, brightness)
+            updateBox(boxId) { it.copy(bedtimeRingBrightness = brightness.coerceIn(0, 100)) }
             null
         }
     }
@@ -368,6 +377,8 @@ class TeddyRemoteRepository(
                     val old = previous[box.id.uppercase()]
                     val metadata = metadataFor(client, box, old?.metadata, forceMetadata)
                     val brightness = old?.ringBrightness ?: runCatching { client.getRingBrightness(box.id) }.getOrNull()
+                    val bedtimeBrightness = old?.bedtimeRingBrightness
+                        ?: runCatching { client.getBedtimeRingBrightness(box.id) }.getOrNull()
                     val catalogImage = old?.boxImageUrl
                         ?: catalog[box.boxModel.lowercase()]?.imageUrl?.let(client::resolveUrl)
                     BoxUiModel(
@@ -375,6 +386,7 @@ class TeddyRemoteRepository(
                         metadata = metadata,
                         boxImageUrl = imageCache.materialize(catalogImage, client),
                         ringBrightness = brightness,
+                        bedtimeRingBrightness = bedtimeBrightness,
                         desiredVolume = old?.desiredVolume,
                         pendingCommand = old?.pendingCommand,
                         commandError = old?.commandError,

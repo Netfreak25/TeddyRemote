@@ -9,7 +9,7 @@ TeddyRemote ist eine moderne native Android-App zur Fernsteuerung von Toniebox-2
 - physischer Tonie mit Bild, RUID, Titel, Kapitel und Laufzeit
 - Previous, Play/Pause, Next und Kapitelauswahl
 - Lautstärkeregelung von 0 bis 10
-- Bedtime starten, neu setzen oder abbrechen sowie bestätigtes zweistufiges Schlafenlegen
+- Bedtime starten, neu setzen oder abbrechen, die Bedtime-Ringhelligkeit steuern sowie bestätigt zweistufig schlafen legen
 - optionale Ringhelligkeit
 - Android-Mediensteuerung für aktive TB2 – ohne lokale Audiowiedergabe
 - mehrere speicherbare TeddyCloud-/MQTT-Verbindungsprofile

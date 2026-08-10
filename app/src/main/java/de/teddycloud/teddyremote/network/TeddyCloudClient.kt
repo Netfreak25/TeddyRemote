@@ -46,9 +46,20 @@ class TeddyCloudClient private constructor(
     suspend fun getRingBrightness(overlay: String): Int? =
         api.getSetting(RING_BRIGHTNESS_SETTING, overlay).string().trim().toIntOrNull()?.coerceIn(0, 100)
 
+    suspend fun getBedtimeRingBrightness(overlay: String): Int? =
+        api.getSetting(BEDTIME_RING_BRIGHTNESS_SETTING, overlay).string().trim().toIntOrNull()?.coerceIn(0, 100)
+
     suspend fun setRingBrightness(overlay: String, brightness: Int) {
         api.setSetting(
             RING_BRIGHTNESS_SETTING,
+            overlay,
+            brightness.coerceIn(0, 100).toString().toRequestBody(TEXT_PLAIN),
+        ).close()
+    }
+
+    suspend fun setBedtimeRingBrightness(overlay: String, brightness: Int) {
+        api.setSetting(
+            BEDTIME_RING_BRIGHTNESS_SETTING,
             overlay,
             brightness.coerceIn(0, 100).toString().toRequestBody(TEXT_PLAIN),
         ).close()
@@ -181,6 +192,7 @@ class TeddyCloudClient private constructor(
         private val TEXT_PLAIN = "text/plain; charset=utf-8".toMediaType()
         private const val BOX_GENERATION_SETTING = "toniebox.boxGeneration"
         private const val RING_BRIGHTNESS_SETTING = "toniebox2.lightring_brightness"
+        private const val BEDTIME_RING_BRIGHTNESS_SETTING = "toniebox2.bedtime_lightring_brightness"
         private const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
         private const val BEDTIME_DURATION_MIN = 300
         private const val BEDTIME_DURATION_MAX = 86_400

@@ -160,6 +160,10 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.repository.setRingBrightness(boxId, level) }
     }
 
+    fun setBedtimeBrightness(boxId: String, level: Int) {
+        viewModelScope.launch { container.repository.setBedtimeRingBrightness(boxId, level) }
+    }
+
     fun setTheme(themeMode: ThemeMode) {
         viewModelScope.launch { container.profilesStore.setThemeMode(themeMode) }
     }

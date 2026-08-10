@@ -94,6 +94,7 @@ fun HomeScreen(
     onBedtime: (String, Boolean, Int?) -> Unit,
     onSleep: (String) -> Unit,
     onBrightness: (String, Int) -> Unit,
+    onBedtimeBrightness: (String, Int) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -162,6 +163,7 @@ fun HomeScreen(
                                 onBedtime = { enabled, duration -> onBedtime(model.box.id, enabled, duration) },
                                 onSleep = { onSleep(model.box.id) },
                                 onBrightness = { onBrightness(model.box.id, it) },
+                                onBedtimeBrightness = { onBedtimeBrightness(model.box.id, it) },
                             )
                         }
                     }
@@ -182,6 +184,7 @@ private fun TonieboxCard(
     onBedtime: (Boolean, Int?) -> Unit,
     onSleep: () -> Unit,
     onBrightness: (Int) -> Unit,
+    onBedtimeBrightness: (Int) -> Unit,
 ) {
     var playlistExpanded by remember(model.box.id) { mutableStateOf(false) }
     var deviceExpanded by remember(model.box.id) { mutableStateOf(false) }
@@ -453,6 +456,7 @@ private fun TonieboxCard(
             remainingSeconds = bedtimeRemaining,
             initialMinutes = ((runtime.bedtime.defaultDuration ?: runtime.bedtime.duration ?: 1_800) / 60)
                 .coerceIn(BEDTIME_MINUTES_MIN, BEDTIME_MINUTES_MAX),
+            bedtimeBrightness = model.bedtimeRingBrightness ?: DEFAULT_BEDTIME_BRIGHTNESS,
             onDismiss = { bedtimeDialogVisible = false },
             onStart = { minutes ->
                 bedtimeDialogVisible = false
@@ -462,6 +466,7 @@ private fun TonieboxCard(
                 bedtimeDialogVisible = false
                 onBedtime(false, null)
             },
+            onBrightness = onBedtimeBrightness,
         )
     }
 
@@ -497,11 +502,14 @@ private fun BedtimeDialog(
     active: Boolean,
     remainingSeconds: Long?,
     initialMinutes: Int,
+    bedtimeBrightness: Int,
     onDismiss: () -> Unit,
     onStart: (Int) -> Unit,
     onStop: () -> Unit,
+    onBrightness: (Int) -> Unit,
 ) {
     var minutes by remember(initialMinutes) { mutableFloatStateOf(initialMinutes.toFloat()) }
+    var brightness by remember(bedtimeBrightness) { mutableFloatStateOf(bedtimeBrightness.toFloat()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.Bedtime, null) },
@@ -513,6 +521,17 @@ private fun BedtimeDialog(
                         remainingSeconds?.let { "Verbleibend: ${formatCountdown(it)}" } ?: "Bedtime ist aktiv.",
                         style = MaterialTheme.typography.titleMedium,
                     )
+                    Text("Bedtime-Ringhelligkeit: ${brightness.roundToInt()} %")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Brightness6, null)
+                        Slider(
+                            value = brightness,
+                            onValueChange = { brightness = it },
+                            onValueChangeFinished = { onBrightness(brightness.roundToInt()) },
+                            valueRange = 0f..100f,
+                            modifier = Modifier.weight(1f).padding(start = 10.dp),
+                        )
+                    }
                 }
                 Text("Dauer: ${minutes.roundToInt()} Minuten")
                 Slider(
@@ -645,4 +664,5 @@ private const val REMOTE_CONTROL_GRACE_SECONDS = 3 * 60L
 private const val BEDTIME_MINUTES_MIN = 5
 private const val BEDTIME_MINUTES_MAX = 24 * 60
 private const val BEDTIME_MINUTES_STEP = 5
+private const val DEFAULT_BEDTIME_BRIGHTNESS = 75
 private val BEDTIME_PRESETS = listOf(5, 15, 30, 60, 120)

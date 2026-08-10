@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import de.teddycloud.teddyremote.BuildConfig
 import de.teddycloud.teddyremote.model.CertificateCandidate
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.LinkStatus
@@ -262,6 +263,16 @@ fun SettingsScreen(
                                 },
                             )
                         }
+                    }
+                    HorizontalDivider()
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Version", style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     HorizontalDivider()
                     OutlinedButton(onClick = onDiagnostics, modifier = Modifier.fillMaxWidth()) {

@@ -94,6 +94,7 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                         onBedtime = viewModel::setBedtime,
                         onSleep = viewModel::sleep,
                         onBrightness = viewModel::setBrightness,
+                        onBedtimeBrightness = viewModel::setBedtimeBrightness,
                     )
                 }
             }
