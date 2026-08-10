@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import androidx.core.content.ContextCompat
 import de.teddycloud.teddyremote.MainActivity
 import de.teddycloud.teddyremote.R
@@ -90,9 +91,16 @@ class TeddyRemoteService : Service() {
         const val ACTION_VOLUME_DOWN = "de.teddycloud.teddyremote.VOLUME_DOWN"
         const val ACTION_VOLUME_UP = "de.teddycloud.teddyremote.VOLUME_UP"
         private const val CONNECTION_NOTIFICATION_ID = 80
+        private const val LOG_TAG = "TeddyRemoteService"
 
         fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, TeddyRemoteService::class.java))
+            try {
+                ContextCompat.startForegroundService(context, Intent(context, TeddyRemoteService::class.java))
+            } catch (error: IllegalStateException) {
+                // Android 12+ rejects foreground-service starts while the process is cached.
+                // The application lifecycle retries when the UI next enters the foreground.
+                Log.w(LOG_TAG, "Foreground service start deferred until the app is visible", error)
+            }
         }
 
         @SuppressLint("ImplicitSamInstance")

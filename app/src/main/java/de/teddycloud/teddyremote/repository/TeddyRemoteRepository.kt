@@ -172,7 +172,23 @@ class TeddyRemoteRepository(
     }
 
     suspend fun refresh() {
-        refreshSnapshot(loadStaticData = false, forceMetadata = true)
+        try {
+            refreshSnapshot(loadStaticData = false, forceMetadata = true)
+            val current = _connection.value
+            _connection.value = current.copy(
+                apiStatus = LinkStatus.CONNECTED,
+                message = current.message.takeIf {
+                    current.mqttStatus == LinkStatus.ERROR || current.mqttStatus == LinkStatus.WARNING
+                },
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            _connection.value = _connection.value.copy(
+                apiStatus = LinkStatus.WARNING,
+                message = "Aktualisierung fehlgeschlagen: ${error.userMessage()}",
+            )
+        }
     }
 
     suspend fun refreshMetadata(boxId: String) {

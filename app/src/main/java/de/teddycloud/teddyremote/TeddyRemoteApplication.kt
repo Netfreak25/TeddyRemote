@@ -16,6 +16,7 @@ class TeddyRemoteApplication : Application(), DefaultLifecycleObserver {
         private set
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var appIsForeground = false
 
     override fun onCreate() {
         super<Application>.onCreate()
@@ -24,17 +25,24 @@ class TeddyRemoteApplication : Application(), DefaultLifecycleObserver {
         applicationScope.launch { container.repository.autoStartIfConfigured() }
         applicationScope.launch {
             container.repository.connection.collectLatest { status ->
-                if (status.desiredConnected) TeddyRemoteService.start(this@TeddyRemoteApplication)
-                else TeddyRemoteService.stop(this@TeddyRemoteApplication)
+                when {
+                    !status.desiredConnected -> TeddyRemoteService.stop(this@TeddyRemoteApplication)
+                    appIsForeground -> TeddyRemoteService.start(this@TeddyRemoteApplication)
+                }
             }
         }
     }
 
     override fun onStart(owner: LifecycleOwner) {
+        appIsForeground = true
         container.repository.setForeground(true)
+        if (container.repository.connection.value.desiredConnected) {
+            TeddyRemoteService.start(this)
+        }
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        appIsForeground = false
         container.repository.setForeground(false)
     }
 }
