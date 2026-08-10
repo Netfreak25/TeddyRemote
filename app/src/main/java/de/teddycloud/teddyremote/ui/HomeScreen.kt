@@ -11,18 +11,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Brightness6
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Headphones
@@ -35,19 +39,20 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -67,6 +72,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -471,27 +478,12 @@ private fun TonieboxCard(
     }
 
     if (sleepDialogVisible) {
-        AlertDialog(
-            onDismissRequest = { sleepDialogVisible = false },
-            icon = { Icon(Icons.Rounded.PowerSettingsNew, null) },
-            title = { Text("Box schlafen legen?") },
-            text = {
-                Text(
-                    if (runtime.bedtime.isActive) {
-                        "Die Box blendet den Ton kurz aus und wechselt anschließend in den Schlafzustand."
-                    } else {
-                        "TeddyRemote aktiviert kurz den Bedtime-Modus mit fünf Minuten und sendet nach dessen Bestätigung den Schlafbefehl."
-                    },
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    sleepDialogVisible = false
-                    onSleep()
-                }) { Text("Schlafen") }
-            },
-            dismissButton = {
-                TextButton(onClick = { sleepDialogVisible = false }) { Text("Abbrechen") }
+        SleepDialog(
+            bedtimeActive = runtime.bedtime.isActive,
+            onDismiss = { sleepDialogVisible = false },
+            onConfirm = {
+                sleepDialogVisible = false
+                onSleep()
             },
         )
     }
@@ -510,64 +502,219 @@ private fun BedtimeDialog(
 ) {
     var minutes by remember(initialMinutes) { mutableFloatStateOf(initialMinutes.toFloat()) }
     var brightness by remember(bedtimeBrightness) { mutableFloatStateOf(bedtimeBrightness.toFloat()) }
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.Bedtime, null) },
-        title = { Text(if (active) "Bedtime-Modus" else "Bedtime starten") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (active) {
-                    Text(
-                        remainingSeconds?.let { "Verbleibend: ${formatCountdown(it)}" } ?: "Bedtime ist aktiv.",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text("Bedtime-Ringhelligkeit: ${brightness.roundToInt()} %")
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Brightness6, null)
-                        Slider(
-                            value = brightness,
-                            onValueChange = { brightness = it },
-                            onValueChangeFinished = { onBrightness(brightness.roundToInt()) },
-                            valueRange = 0f..100f,
-                            modifier = Modifier.weight(1f).padding(start = 10.dp),
-                        )
-                    }
-                }
-                Text("Dauer: ${minutes.roundToInt()} Minuten")
-                Slider(
-                    value = minutes,
-                    onValueChange = {
-                        minutes = ((it / BEDTIME_MINUTES_STEP).roundToInt() * BEDTIME_MINUTES_STEP)
-                            .coerceIn(BEDTIME_MINUTES_MIN, BEDTIME_MINUTES_MAX)
-                            .toFloat()
-                    },
-                    valueRange = BEDTIME_MINUTES_MIN.toFloat()..BEDTIME_MINUTES_MAX.toFloat(),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(20.dp).heightIn(max = 760.dp),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 8.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                DialogHeader(
+                    icon = Icons.Rounded.Bedtime,
+                    eyebrow = if (active) "BEDTIME AKTIV" else "GUTE NACHT",
+                    title = if (active) "Bedtime anpassen" else "Bedtime starten",
+                    onDismiss = onDismiss,
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+
+                if (active) {
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text("NOCH", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                remainingSeconds?.let(::formatCountdown) ?: "Aktiv",
+                                style = MaterialTheme.typography.displaySmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    BEDTIME_PRESETS.forEach { preset ->
-                        AssistChip(
-                            onClick = { minutes = preset.toFloat() },
-                            label = { Text("$preset min") },
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text("Dauer", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                formatBedtimeMinutes(minutes.roundToInt()),
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        Slider(
+                            value = minutes,
+                            onValueChange = {
+                                minutes = ((it / BEDTIME_MINUTES_STEP).roundToInt() * BEDTIME_MINUTES_STEP)
+                                    .coerceIn(BEDTIME_MINUTES_MIN, BEDTIME_MINUTES_MAX)
+                                    .toFloat()
+                            },
+                            valueRange = BEDTIME_MINUTES_MIN.toFloat()..BEDTIME_MINUTES_MAX.toFloat(),
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            BEDTIME_PRESETS.forEach { preset ->
+                                FilterChip(
+                                    selected = minutes.roundToInt() == preset,
+                                    onClick = { minutes = preset.toFloat() },
+                                    label = { Text(formatBedtimeMinutes(preset)) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (active) {
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                    ) {
+                        Column(Modifier.padding(18.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    Modifier.size(42.dp).clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.tertiaryContainer),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Rounded.Brightness6, null, Modifier.size(22.dp))
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("Ringhelligkeit", style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        "${brightness.roundToInt()} % im Bedtime-Modus",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            Slider(
+                                value = brightness,
+                                onValueChange = { brightness = it },
+                                onValueChangeFinished = { onBrightness(brightness.roundToInt()) },
+                                valueRange = 0f..100f,
+                            )
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = { onStart(minutes.roundToInt()) },
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Icon(Icons.Rounded.Bedtime, null)
+                    Spacer(Modifier.width(10.dp))
+                    Text(if (active) "Mit neuer Dauer starten" else "Bedtime starten")
+                }
+                if (active) {
+                    OutlinedButton(
+                        onClick = onStop,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(18.dp),
+                    ) {
+                        Text("Bedtime beenden")
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(onClick = { onStart(minutes.roundToInt()) }) {
-                Text(if (active) "Neu starten" else "Starten")
+        }
+    }
+}
+
+@Composable
+private fun SleepDialog(
+    bedtimeActive: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 8.dp,
+        ) {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                DialogHeader(
+                    icon = Icons.Rounded.PowerSettingsNew,
+                    eyebrow = "SCHLAFZUSTAND",
+                    title = "Box schlafen legen?",
+                    onDismiss = onDismiss,
+                )
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                ) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            if (bedtimeActive) {
+                                "Bedtime ist bereits aktiv. Der Schlafbefehl kann direkt gesendet werden."
+                            } else {
+                                "TeddyRemote aktiviert zuerst fünf Minuten Bedtime und wartet auf die Bestätigung der Box. Danach folgt automatisch der Schlafbefehl."
+                            },
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            "Der Ton wird kurz ausgeblendet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Button(
+                    onClick = onConfirm,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Icon(Icons.Rounded.PowerSettingsNew, null)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Jetzt schlafen legen")
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                    Text("Abbrechen")
+                }
             }
-        },
-        dismissButton = {
-            Row {
-                if (active) TextButton(onClick = onStop) { Text("Beenden") }
-                TextButton(onClick = onDismiss) { Text("Abbrechen") }
-            }
-        },
-    )
+        }
+    }
+}
+
+@Composable
+private fun DialogHeader(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    eyebrow: String,
+    title: String,
+    onDismiss: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(58.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, Modifier.size(30.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(eyebrow, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        }
+        IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Schließen") }
+    }
 }
 
 @Composable
@@ -651,6 +798,13 @@ private fun formatCountdown(seconds: Long): String {
     val remainder = seconds % 60
     return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, remainder)
     else "%d:%02d".format(minutes, remainder)
+}
+
+private fun formatBedtimeMinutes(minutes: Int): String {
+    if (minutes < 60) return "$minutes min"
+    val hours = minutes / 60
+    val remainder = minutes % 60
+    return if (remainder == 0) "$hours h" else "$hours h $remainder min"
 }
 
 private fun isRemoteControlVisible(online: Boolean, lastConnection: Long): Boolean {
