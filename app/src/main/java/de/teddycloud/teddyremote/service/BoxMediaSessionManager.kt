@@ -129,8 +129,16 @@ class BoxMediaSessionManager(
                     PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
                     PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM,
             )
-            .addCustomAction(TeddyRemoteService.ACTION_VOLUME_DOWN, "Leiser", android.R.drawable.ic_media_rew)
-            .addCustomAction(TeddyRemoteService.ACTION_VOLUME_UP, "Lauter", android.R.drawable.ic_media_ff)
+            .addCustomAction(
+                TeddyRemoteService.ACTION_VOLUME_DOWN,
+                context.getString(R.string.media_volume_down),
+                R.drawable.ic_volume_down,
+            )
+            .addCustomAction(
+                TeddyRemoteService.ACTION_VOLUME_UP,
+                context.getString(R.string.media_volume_up),
+                R.drawable.ic_volume_up,
+            )
             .setState(state, playback.chapterUntilMs ?: 0L, if (playback.isPlaying) 1f else 0f)
             .build()
         session.mediaSession.setPlaybackState(playbackState)
@@ -170,11 +178,51 @@ class BoxMediaSessionManager(
             .setOngoing(playing)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .addAction(action(android.R.drawable.ic_media_previous, "Zurück", model.box.id, TeddyRemoteService.ACTION_PREVIOUS, 1))
-            .addAction(action(if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (playing) "Pause" else "Play", model.box.id, TeddyRemoteService.ACTION_PLAY_PAUSE, 2))
-            .addAction(action(android.R.drawable.ic_media_next, "Weiter", model.box.id, TeddyRemoteService.ACTION_NEXT, 3))
-            .addAction(action(android.R.drawable.ic_media_rew, "Leiser", model.box.id, TeddyRemoteService.ACTION_VOLUME_DOWN, 4))
-            .addAction(action(android.R.drawable.ic_media_ff, "Lauter", model.box.id, TeddyRemoteService.ACTION_VOLUME_UP, 5))
+            .addAction(
+                action(
+                    android.R.drawable.ic_media_previous,
+                    context.getString(R.string.media_previous),
+                    model.box.id,
+                    TeddyRemoteService.ACTION_PREVIOUS,
+                    1,
+                ),
+            )
+            .addAction(
+                action(
+                    if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                    context.getString(if (playing) R.string.media_pause else R.string.media_play),
+                    model.box.id,
+                    TeddyRemoteService.ACTION_PLAY_PAUSE,
+                    2,
+                ),
+            )
+            .addAction(
+                action(
+                    android.R.drawable.ic_media_next,
+                    context.getString(R.string.media_next),
+                    model.box.id,
+                    TeddyRemoteService.ACTION_NEXT,
+                    3,
+                ),
+            )
+            .addAction(
+                action(
+                    R.drawable.ic_volume_down,
+                    context.getString(R.string.media_volume_down),
+                    model.box.id,
+                    TeddyRemoteService.ACTION_VOLUME_DOWN,
+                    4,
+                ),
+            )
+            .addAction(
+                action(
+                    R.drawable.ic_volume_up,
+                    context.getString(R.string.media_volume_up),
+                    model.box.id,
+                    TeddyRemoteService.ACTION_VOLUME_UP,
+                    5,
+                ),
+            )
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(session.mediaSession.sessionToken)
