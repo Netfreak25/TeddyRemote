@@ -1,4 +1,4 @@
-# TeddyRemote
+﻿# TeddyRemote
 
 TeddyRemote ist eine moderne native Android-App zur Fernsteuerung von Toniebox-2-Geräten über TeddyCloud. Die App gibt selbst kein Audio wieder: Sie zeigt den aktuellen Zustand der Boxen an und sendet Steuerbefehle über die TeddyCloud-API.
 
@@ -21,10 +21,11 @@ TeddyRemote ist eine moderne native Android-App zur Fernsteuerung von Toniebox-2
 TeddyRemote unterstützt ausschließlich Toniebox 2. TB1-Geräte werden bewusst nicht angezeigt.
 
 ## Screenshots
-
 | Boxübersicht | Einstellungen |
 |---|---|
 | <img src="docs/screenshots/home.png" alt="TeddyRemote Boxübersicht" width="360"> | <img src="docs/screenshots/settings.png" alt="TeddyRemote Einstellungen" width="360"> |
+| Player | Sperrbildschirm |
+| <img src="docs/screenshots/audioplayer.jpg" alt="TeddyRemote Player" width="360"> | <img src="docs/screenshots/lockscreen.jpg" alt="TeddyRemote Sperrbildschirm" width="360"> |
 
 ## Voraussetzungen
 
@@ -124,3 +125,4 @@ Fehlt die externe Release-Konfiguration, signiert Gradle den lokalen Release-Bui
 ## Entwicklungsstatus
 
 TeddyRemote befindet sich in aktiver Entwicklung. Die App setzt die im verwendeten TeddyCloud-TB2-Branch bereitgestellten Zustands- und Steuerendpunkte voraus; andere TeddyCloud-Versionen können noch nicht alle angezeigten Funktionen liefern.
+
