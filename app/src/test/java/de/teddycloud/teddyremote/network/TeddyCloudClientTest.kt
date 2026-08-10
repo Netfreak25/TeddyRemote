@@ -106,6 +106,41 @@ class TeddyCloudClientTest {
     }
 
     @Test
+    fun `imports remote MQTT settings using the public TeddyCloud host`() = runTest {
+        listOf(
+            "https;//tbs2.tonie.cloud:8443/",
+            "true",
+            "1883",
+            "TeddyUser",
+            " TeddyPassword ",
+            "teddyCloud",
+            "true",
+        ).forEach { server.enqueue(MockResponse().setBody(it)) }
+
+        val imported = client.getMqttSettingsForRemote()
+
+        assertTrue(imported.enabled)
+        assertEquals("tbs2.tonie.cloud", imported.host)
+        assertEquals(1883, imported.port)
+        assertEquals("TeddyUser", imported.username)
+        assertEquals(" TeddyPassword ", imported.password)
+        assertEquals("teddyCloud", imported.prefix)
+        assertTrue(imported.tlsEnabled)
+        assertEquals(
+            listOf(
+                "/api/settings/get/core.host_url",
+                "/api/settings/get/mqtt.enabled",
+                "/api/settings/get/mqtt.port",
+                "/api/settings/get/mqtt.username",
+                "/api/settings/get/mqtt.password",
+                "/api/settings/get/mqtt.topic",
+                "/api/settings/get/mqtt.tls_enabled",
+            ),
+            List(7) { server.takeRequest().path },
+        )
+    }
+
+    @Test
     fun `parses playlist and title from tag info`() = runTest {
         server.enqueue(
             MockResponse().setBody(

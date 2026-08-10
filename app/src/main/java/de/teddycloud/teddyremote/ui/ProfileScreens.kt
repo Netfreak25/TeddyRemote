@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Fingerprint
@@ -331,10 +332,12 @@ fun ProfileEditorScreen(
     initialPassword: String,
     apiTest: ProfileTestState,
     mqttTest: ProfileTestState,
+    mqttImport: MqttImportState,
     onBack: () -> Unit,
     onSave: (ConnectionProfile, String, Boolean) -> Unit,
     onTestApi: (ConnectionProfile) -> Unit,
     onTestMqtt: (ConnectionProfile, String) -> Unit,
+    onImportMqtt: (ConnectionProfile) -> Unit,
     onAcceptCertificate: (CertificateCandidate) -> Unit,
 ) {
     var profile by remember(initialProfile.id) { mutableStateOf(initialProfile) }
@@ -342,11 +345,25 @@ fun ProfileEditorScreen(
     var saveAndConnect by remember { mutableStateOf(true) }
     val errors = profile.validate()
     LaunchedEffect(initialProfile) { profile = initialProfile }
+    LaunchedEffect(mqttImport.settings) {
+        mqttImport.settings?.let { imported ->
+            profile = profile.copy(
+                mqttEnabled = imported.enabled,
+                mqttHost = imported.host,
+                mqttPort = imported.port,
+                mqttPrefix = imported.prefix,
+                mqttTls = imported.tlsEnabled,
+                mqttUsername = imported.username,
+                mqttCertificateFingerprint = null,
+            )
+            password = imported.password
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (initialProfile.apiBaseUrl.isBlank()) "Profil einrichten" else "Profil bearbeiten") },
+                title = { Text("Profil konfigurieren") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Zurück") } },
                 windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
             )
@@ -387,6 +404,30 @@ fun ProfileEditorScreen(
                     onAcceptCertificate(candidate)
                 },
             )
+            OutlinedButton(
+                onClick = { onImportMqtt(profile.normalized()) },
+                enabled = apiTest.status == LinkStatus.CONNECTED && mqttImport.status != LinkStatus.CONNECTING,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (mqttImport.status == LinkStatus.CONNECTING) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Rounded.Download, null)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text("MQTT Settings importieren")
+            }
+            mqttImport.message?.let { message ->
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (mqttImport.status == LinkStatus.ERROR) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
 
             HorizontalDivider()
             Row(verticalAlignment = Alignment.CenterVertically) {

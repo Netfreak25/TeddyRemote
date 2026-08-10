@@ -14,6 +14,7 @@ import de.teddycloud.teddyremote.model.ConnectionStatus
 import de.teddycloud.teddyremote.model.HeadphonesRuntime
 import de.teddycloud.teddyremote.model.LinkStatus
 import de.teddycloud.teddyremote.model.MqttBoxEvent
+import de.teddycloud.teddyremote.model.MqttSettingsImport
 import de.teddycloud.teddyremote.model.PlaybackRuntime
 import de.teddycloud.teddyremote.model.TonieMetadata
 import de.teddycloud.teddyremote.model.TonieboxDto
@@ -148,6 +149,13 @@ class TeddyRemoteRepository(
     suspend fun testApi(profile: ConnectionProfile): Result<Unit> = runCatching {
         require(profile.validate().isEmpty()) { profile.validate().joinToString() }
         TeddyCloudClient.create(profile.normalized()).getBoxes()
+    }
+
+    suspend fun importMqttSettings(profile: ConnectionProfile): Result<MqttSettingsImport> = runCatching {
+        require(profile.validate().none { it.startsWith("TeddyCloud-URL") }) {
+            "TeddyCloud-URL ist ungültig"
+        }
+        TeddyCloudClient.create(profile.normalized()).getMqttSettingsForRemote()
     }
 
     suspend fun testMqtt(profile: ConnectionProfile, password: String?): Result<Unit> = runCatching {

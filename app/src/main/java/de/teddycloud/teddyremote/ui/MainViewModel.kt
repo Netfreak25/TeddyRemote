@@ -10,6 +10,7 @@ import de.teddycloud.teddyremote.model.CertificateTarget
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.ConnectionStatus
 import de.teddycloud.teddyremote.model.LinkStatus
+import de.teddycloud.teddyremote.model.MqttSettingsImport
 import de.teddycloud.teddyremote.model.ProfilesState
 import de.teddycloud.teddyremote.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,12 @@ data class ProfileTestState(
     val candidate: CertificateCandidate? = null,
 )
 
+data class MqttImportState(
+    val status: LinkStatus = LinkStatus.NOT_CHECKED,
+    val message: String? = null,
+    val settings: MqttSettingsImport? = null,
+)
+
 data class MainUiState(
     val profiles: ProfilesState = ProfilesState(),
     val connection: ConnectionStatus = ConnectionStatus(),
@@ -36,6 +43,7 @@ data class MainUiState(
     val editingPassword: String = "",
     val apiTest: ProfileTestState = ProfileTestState(),
     val mqttTest: ProfileTestState = ProfileTestState(),
+    val mqttImport: MqttImportState = MqttImportState(),
     val focusedBoxId: String? = null,
     val isRefreshing: Boolean = false,
 ) {
@@ -60,6 +68,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             editingPassword = local.editingPassword,
             apiTest = local.apiTest,
             mqttTest = local.mqttTest,
+            mqttImport = local.mqttImport,
             focusedBoxId = local.focusedBoxId,
             isRefreshing = local.isRefreshing,
         )
@@ -77,6 +86,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                 editingPassword = "",
                 apiTest = ProfileTestState(),
                 mqttTest = ProfileTestState(),
+                mqttImport = MqttImportState(),
             )
             return
         }
@@ -87,6 +97,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                 editingPassword = container.profilesStore.mqttPassword(profile.id).orEmpty(),
                 apiTest = ProfileTestState(),
                 mqttTest = ProfileTestState(),
+                mqttImport = MqttImportState(),
             )
         }
     }
@@ -210,6 +221,34 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun importMqttSettings(profile: ConnectionProfile) {
+        if (transient.value.mqttImport.status == LinkStatus.CONNECTING) return
+        transient.value = transient.value.copy(
+            mqttImport = MqttImportState(LinkStatus.CONNECTING, "MQTT-Einstellungen werden gelesen …"),
+        )
+        viewModelScope.launch {
+            val result = container.repository.importMqttSettings(profile)
+            transient.value = transient.value.copy(
+                mqttImport = result.fold(
+                    onSuccess = { settings ->
+                        MqttImportState(
+                            status = LinkStatus.CONNECTED,
+                            message = if (settings.enabled) {
+                                "MQTT-Einstellungen aus TeddyCloud übernommen"
+                            } else {
+                                "MQTT-Einstellungen übernommen; MQTT ist in TeddyCloud deaktiviert"
+                            },
+                            settings = settings,
+                        )
+                    },
+                    onFailure = { error ->
+                        MqttImportState(LinkStatus.ERROR, error.message ?: "MQTT-Import fehlgeschlagen")
+                    },
+                ),
+            )
+        }
+    }
+
     fun acceptTestCertificate(candidate: CertificateCandidate) {
         val current = transient.value.editingProfile ?: return
         val updated = when (candidate.target) {
@@ -241,6 +280,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         val editingPassword: String = "",
         val apiTest: ProfileTestState = ProfileTestState(),
         val mqttTest: ProfileTestState = ProfileTestState(),
+        val mqttImport: MqttImportState = MqttImportState(),
         val focusedBoxId: String? = null,
         val isRefreshing: Boolean = false,
     )

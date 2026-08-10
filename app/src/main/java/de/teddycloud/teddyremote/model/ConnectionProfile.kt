@@ -15,7 +15,7 @@ enum class ThemeMode {
 data class ConnectionProfile(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "Meine TeddyCloud",
-    val apiBaseUrl: String = "",
+    val apiBaseUrl: String = DEFAULT_API_BASE_URL,
     val mqttEnabled: Boolean = false,
     val mqttHost: String = "",
     val mqttPort: Int = 1883,
@@ -60,6 +60,8 @@ data class ConnectionProfile(
     }
 
     companion object {
+        const val DEFAULT_API_BASE_URL = "https://tbs2.tonie.cloud:8443/"
+
         fun normalizeBaseUrl(value: String): String {
             val trimmed = value.trim()
             if (trimmed.isBlank()) return ""
@@ -68,6 +70,16 @@ data class ConnectionProfile(
         }
     }
 }
+
+data class MqttSettingsImport(
+    val enabled: Boolean,
+    val host: String,
+    val port: Int,
+    val prefix: String,
+    val tlsEnabled: Boolean,
+    val username: String,
+    val password: String,
+)
 
 private fun String.normalizeFingerprint(): String =
     replace(":", "").replace(" ", "").uppercase()

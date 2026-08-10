@@ -59,10 +59,12 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                         initialPassword = state.editingPassword,
                         apiTest = state.apiTest,
                         mqttTest = state.mqttTest,
+                        mqttImport = state.mqttImport,
                         onBack = { viewModel.navigate(if (state.needsOnboarding) AppScreen.HOME else AppScreen.SETTINGS) },
                         onSave = viewModel::saveProfile,
                         onTestApi = viewModel::testApi,
                         onTestMqtt = viewModel::testMqtt,
+                        onImportMqtt = viewModel::importMqttSettings,
                         onAcceptCertificate = viewModel::acceptTestCertificate,
                     )
                     state.screen == AppScreen.DIAGNOSTICS -> DiagnosticsScreen(

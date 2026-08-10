@@ -3,6 +3,7 @@ package de.teddycloud.teddyremote.network
 import de.teddycloud.teddyremote.model.BoxesResponse
 import de.teddycloud.teddyremote.model.CommandResponse
 import de.teddycloud.teddyremote.model.ConnectionProfile
+import de.teddycloud.teddyremote.model.MqttSettingsImport
 import de.teddycloud.teddyremote.model.PlaylistTrack
 import de.teddycloud.teddyremote.model.TonieMetadata
 import de.teddycloud.teddyremote.model.TonieboxCatalogEntry
@@ -48,6 +49,20 @@ class TeddyCloudClient private constructor(
 
     suspend fun getBedtimeRingBrightness(overlay: String): Int? =
         api.getSetting(BEDTIME_RING_BRIGHTNESS_SETTING, overlay).string().trim().toIntOrNull()?.coerceIn(0, 100)
+
+    suspend fun getMqttSettingsForRemote(): MqttSettingsImport {
+        val hostUrl = globalSetting(HOST_URL_SETTING)
+        val publicHost = publicHostFromUrl(hostUrl)
+        val enabled = globalSetting(MQTT_ENABLED_SETTING).parseSettingBoolean(MQTT_ENABLED_SETTING)
+        val port = globalSetting(MQTT_PORT_SETTING).toIntOrNull()
+            ?.takeIf { it in 1..65_535 }
+            ?: error("Ungültiger MQTT-Port in TeddyCloud")
+        val username = globalSetting(MQTT_USERNAME_SETTING)
+        val password = globalSetting(MQTT_PASSWORD_SETTING, trim = false)
+        val prefix = globalSetting(MQTT_TOPIC_SETTING).trim('/').ifBlank { "teddyCloud" }
+        val tlsEnabled = globalSetting(MQTT_TLS_SETTING).parseSettingBoolean(MQTT_TLS_SETTING)
+        return MqttSettingsImport(enabled, publicHost, port, prefix, tlsEnabled, username, password)
+    }
 
     suspend fun setRingBrightness(overlay: String, brightness: Int) {
         api.setSetting(
@@ -187,12 +202,24 @@ class TeddyCloudClient private constructor(
     private fun parseCommand(body: okhttp3.ResponseBody): CommandResponse =
         networkJson.decodeFromString(body.use { it.string() })
 
+    private suspend fun globalSetting(key: String, trim: Boolean = true): String {
+        val value = api.getSetting(key).use { it.string() }
+        return if (trim) value.trim() else value
+    }
+
     companion object {
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         private val TEXT_PLAIN = "text/plain; charset=utf-8".toMediaType()
         private const val BOX_GENERATION_SETTING = "toniebox.boxGeneration"
         private const val RING_BRIGHTNESS_SETTING = "toniebox2.lightring_brightness"
         private const val BEDTIME_RING_BRIGHTNESS_SETTING = "toniebox2.bedtime_lightring_brightness"
+        private const val HOST_URL_SETTING = "core.host_url"
+        private const val MQTT_ENABLED_SETTING = "mqtt.enabled"
+        private const val MQTT_PORT_SETTING = "mqtt.port"
+        private const val MQTT_USERNAME_SETTING = "mqtt.username"
+        private const val MQTT_PASSWORD_SETTING = "mqtt.password"
+        private const val MQTT_TOPIC_SETTING = "mqtt.topic"
+        private const val MQTT_TLS_SETTING = "mqtt.tls_enabled"
         private const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
         private const val BEDTIME_DURATION_MIN = 300
         private const val BEDTIME_DURATION_MAX = 86_400
@@ -238,6 +265,22 @@ class TeddyCloudClient private constructor(
             else -> 80
         }
     }
+}
+
+private fun String.parseSettingBoolean(key: String): Boolean = when {
+    equals("true", ignoreCase = true) -> true
+    equals("false", ignoreCase = true) -> false
+    else -> error("Ungültiger boolescher Wert für $key")
+}
+
+private fun publicHostFromUrl(rawUrl: String): String {
+    val correctedUrl = rawUrl.replace(Regex("^(https?);//", RegexOption.IGNORE_CASE)) {
+        "${it.groupValues[1]}://"
+    }
+    return runCatching { URI(correctedUrl).host }
+        .getOrNull()
+        ?.takeIf(String::isNotBlank)
+        ?: error("core.host_url enthält keine gültige öffentliche Hostadresse")
 }
 
 private fun JsonObject?.string(name: String): String? =

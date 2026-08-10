@@ -6,6 +6,11 @@ import org.junit.Test
 
 class ConnectionProfileTest {
     @Test
+    fun `uses the public TeddyCloud endpoint for new profiles`() {
+        assertEquals("https://tbs2.tonie.cloud:8443/", ConnectionProfile().apiBaseUrl)
+    }
+
+    @Test
     fun `normalizes URL prefix and retry bounds`() {
         val profile = ConnectionProfile(
             name = "  Zuhause  ",
