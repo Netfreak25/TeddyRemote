@@ -13,6 +13,7 @@ import android.media.session.PlaybackState
 import android.media.VolumeProvider
 import android.os.Bundle
 import androidx.core.graphics.drawable.toBitmap
+import androidx.mediarouter.media.MediaRouter
 import coil.ImageLoader
 import coil.request.ImageRequest
 import de.teddycloud.teddyremote.MainActivity
@@ -31,6 +32,13 @@ class BoxMediaSessionManager(
     private val notificationManager = context.getSystemService(NotificationManager::class.java)
     private val imageLoader = ImageLoader(context)
     private val sessions = mutableMapOf<String, BoxSession>()
+    private val mediaRouter = MediaRouter.getInstance(context)
+    private val routeProvider = TeddyRemoteMediaRouteProvider(context, ::setRouteVolume)
+    private var selectedRouteBoxId: String? = null
+
+    init {
+        mediaRouter.addProvider(routeProvider)
+    }
 
     fun update(boxes: List<BoxUiModel>) {
         val eligible = boxes.filter { it.box.runtime.online && it.box.runtime.controls.playback }
@@ -44,6 +52,7 @@ class BoxMediaSessionManager(
             val imageUrl = model.metadata?.pictureUrl ?: model.boxImageUrl
             if (imageUrl != null && imageUrl != session.artworkUrl) loadArtwork(session, imageUrl)
         }
+        updateMediaRoute(eligible)
     }
 
     fun handleAction(boxId: String, action: String) {
@@ -60,6 +69,9 @@ class BoxMediaSessionManager(
     }
 
     fun release() {
+        clearSelectedMediaRoute()
+        routeProvider.update(emptyList())
+        mediaRouter.removeProvider(routeProvider)
         sessions.keys.toList().forEach(::remove)
         imageLoader.shutdown()
     }
@@ -253,6 +265,42 @@ class BoxMediaSessionManager(
         scope.launch { repository.setVolume(session.model.box.id, bounded) }
     }
 
+    private fun setRouteVolume(boxId: String, value: Int) {
+        sessions[boxId.uppercase()]?.let { setVolume(it, value) }
+    }
+
+    private fun updateMediaRoute(eligible: Map<String, BoxUiModel>) {
+        routeProvider.update(eligible.values)
+        val nextBoxId = selectMediaRouteBoxId(
+            candidates = eligible.map { (boxId, model) ->
+                MediaRouteCandidate(
+                    boxId = boxId,
+                    isPlaying = model.box.runtime.playback.isPlaying,
+                    playbackUpdatedAt = model.box.runtime.playback.updatedAt,
+                    displayName = model.box.boxName.ifBlank { model.box.commonName.ifBlank { boxId } },
+                )
+            },
+            previousBoxId = selectedRouteBoxId,
+        )
+        if (nextBoxId == null) {
+            clearSelectedMediaRoute()
+            return
+        }
+        selectedRouteBoxId = nextBoxId
+        val routeId = routeProvider.routeId(nextBoxId)
+        val route = mediaRouter.routes.firstOrNull { it.mediaRouteDescriptor?.id == routeId } ?: return
+        if (!route.isSelected) mediaRouter.selectRoute(route)
+        mediaRouter.setMediaSession(sessions.getValue(nextBoxId).mediaSession)
+    }
+
+    private fun clearSelectedMediaRoute() {
+        mediaRouter.setMediaSession(null)
+        if (mediaRouter.selectedRoute.mediaRouteDescriptor?.id?.startsWith(MEDIA_ROUTE_PREFIX) == true) {
+            mediaRouter.selectRoute(mediaRouter.defaultRoute)
+        }
+        selectedRouteBoxId = null
+    }
+
     private fun action(icon: Int, title: String, boxId: String, action: String, offset: Int): Notification.Action =
         Notification.Action.Builder(
             Icon.createWithResource(context, icon),
@@ -296,5 +344,6 @@ class BoxMediaSessionManager(
 
     private companion object {
         const val MAX_BOX_VOLUME = 10
+        const val MEDIA_ROUTE_PREFIX = "teddyremote:"
     }
 }
