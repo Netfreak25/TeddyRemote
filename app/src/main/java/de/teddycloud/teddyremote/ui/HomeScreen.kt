@@ -29,11 +29,13 @@ import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -47,9 +49,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -68,10 +72,13 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import coil.compose.AsyncImage
 import de.teddycloud.teddyremote.model.BoxUiModel
+import de.teddycloud.teddyremote.model.BedtimeRuntime
 import de.teddycloud.teddyremote.model.LinkStatus
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,8 +88,11 @@ fun HomeScreen(
     onConnect: () -> Unit,
     onOpenSettings: () -> Unit,
     onPlayback: (String, String, Int?) -> Unit,
+    onRefreshPlaylist: (String) -> Unit,
     onVolume: (String, Int) -> Unit,
     onPing: (String) -> Unit,
+    onBedtime: (String, Boolean, Int?) -> Unit,
+    onSleep: (String) -> Unit,
     onBrightness: (String, Int) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
@@ -146,8 +156,11 @@ fun HomeScreen(
                                 model = model,
                                 highlighted = state.focusedBoxId?.equals(model.box.id, ignoreCase = true) == true,
                                 onPlayback = { action, chapter -> onPlayback(model.box.id, action, chapter) },
+                                onRefreshPlaylist = { onRefreshPlaylist(model.box.id) },
                                 onVolume = { onVolume(model.box.id, it) },
                                 onPing = { onPing(model.box.id) },
+                                onBedtime = { enabled, duration -> onBedtime(model.box.id, enabled, duration) },
+                                onSleep = { onSleep(model.box.id) },
                                 onBrightness = { onBrightness(model.box.id, it) },
                             )
                         }
@@ -163,12 +176,17 @@ private fun TonieboxCard(
     model: BoxUiModel,
     highlighted: Boolean,
     onPlayback: (String, Int?) -> Unit,
+    onRefreshPlaylist: () -> Unit,
     onVolume: (Int) -> Unit,
     onPing: () -> Unit,
+    onBedtime: (Boolean, Int?) -> Unit,
+    onSleep: () -> Unit,
     onBrightness: (Int) -> Unit,
 ) {
     var playlistExpanded by remember(model.box.id) { mutableStateOf(false) }
     var deviceExpanded by remember(model.box.id) { mutableStateOf(false) }
+    var bedtimeDialogVisible by remember(model.box.id) { mutableStateOf(false) }
+    var sleepDialogVisible by remember(model.box.id) { mutableStateOf(false) }
     val runtime = model.box.runtime
     val displayVolume = model.desiredVolume ?: runtime.volume.level ?: 0
     var volume by remember(model.box.id, displayVolume) {
@@ -178,6 +196,7 @@ private fun TonieboxCard(
         mutableFloatStateOf((model.ringBrightness ?: 100).toFloat())
     }
     val remoteControlVisible = isRemoteControlVisible(runtime.online, runtime.lastConnection)
+    val bedtimeRemaining = rememberBedtimeRemaining(runtime.bedtime)
     Card(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
         colors = if (highlighted) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -268,10 +287,40 @@ private fun TonieboxCard(
                 if ((runtime.headphones.connectedCount ?: 0) > 0) {
                     StatusChip(Icons.Rounded.Headphones, "${runtime.headphones.connectedCount} verbunden")
                 }
-                runtime.bedtime.state?.let { StatusChip(Icons.Rounded.Bedtime, it) }
+                if (runtime.bedtime.isActive) {
+                    StatusChip(
+                        Icons.Rounded.Bedtime,
+                        bedtimeRemaining?.let { "Bedtime ${formatCountdown(it)}" } ?: "Bedtime aktiv",
+                    )
+                }
             }
 
             if (remoteControlVisible) {
+                if (runtime.controls.bedtime || runtime.controls.sleep || runtime.bedtime.isActive) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = { bedtimeDialogVisible = true },
+                            enabled = runtime.controls.bedtime && model.pendingCommand == null,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Rounded.Bedtime, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (runtime.bedtime.isActive) "Bedtime" else "Bedtime starten")
+                        }
+                        OutlinedButton(
+                            onClick = { sleepDialogVisible = true },
+                            enabled = runtime.controls.sleep && model.pendingCommand == null,
+                        ) {
+                            Icon(Icons.Rounded.PowerSettingsNew, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Schlafen")
+                        }
+                    }
+                }
+
                 Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -316,36 +365,57 @@ private fun TonieboxCard(
             }
 
             val playlist = model.metadata?.playlist.orEmpty()
+            val playlistCanLoad = runtime.playback.ruid?.matches(RUID_PATTERN) == true
             OutlinedButton(
-                onClick = { playlistExpanded = !playlistExpanded },
-                enabled = playlist.isNotEmpty(),
+                onClick = {
+                    if (playlist.isEmpty()) {
+                        playlistExpanded = true
+                        onRefreshPlaylist()
+                    } else {
+                        playlistExpanded = !playlistExpanded
+                    }
+                },
+                enabled = playlist.isNotEmpty() || playlistCanLoad,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.AutoMirrored.Rounded.QueueMusic, null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (playlist.isEmpty()) "Keine Playlistdaten" else "Playlist (${playlist.size})")
+                Text(if (playlist.isEmpty()) "Kapitelinformationen laden" else "Playlist (${playlist.size})")
                 Spacer(Modifier.weight(1f))
                 Icon(if (playlistExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null)
             }
-            AnimatedVisibility(playlistExpanded && playlist.isNotEmpty()) {
-                Column {
-                    playlist.forEach { track ->
-                        val selected = runtime.playback.chapter == track.index
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("${track.index + 1}.", modifier = Modifier.width(28.dp))
-                            Text(track.title, modifier = Modifier.weight(1f), maxLines = 2)
-                            track.durationSeconds?.let { Text(formatDuration(it), style = MaterialTheme.typography.labelSmall) }
-                            IconButton(
-                                enabled = runtime.controls.playback,
-                                onClick = { onPlayback("setPosition", track.index) },
-                            ) { Icon(Icons.Rounded.PlayArrow, "Kapitel abspielen") }
+            AnimatedVisibility(playlistExpanded) {
+                if (playlist.isEmpty()) {
+                    Text(
+                        "Noch keine Kapitelinformationen verfügbar. Tippe zum erneuten Laden noch einmal auf die Schaltfläche.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                } else {
+                    Column {
+                        playlist.forEach { track ->
+                            val selected = runtime.playback.chapter == track.index
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("${track.index + 1}.", modifier = Modifier.width(28.dp))
+                                Text(track.title, modifier = Modifier.weight(1f), maxLines = 2)
+                                track.durationSeconds?.let {
+                                    Text(formatDuration(it), style = MaterialTheme.typography.labelSmall)
+                                }
+                                IconButton(
+                                    enabled = runtime.controls.playback,
+                                    onClick = { onPlayback("setPosition", track.index) },
+                                ) { Icon(Icons.Rounded.PlayArrow, "Kapitel abspielen") }
+                            }
                         }
                     }
                 }
@@ -376,6 +446,127 @@ private fun TonieboxCard(
             }
         }
     }
+
+    if (bedtimeDialogVisible) {
+        BedtimeDialog(
+            active = runtime.bedtime.isActive,
+            remainingSeconds = bedtimeRemaining,
+            initialMinutes = ((runtime.bedtime.defaultDuration ?: runtime.bedtime.duration ?: 1_800) / 60)
+                .coerceIn(BEDTIME_MINUTES_MIN, BEDTIME_MINUTES_MAX),
+            onDismiss = { bedtimeDialogVisible = false },
+            onStart = { minutes ->
+                bedtimeDialogVisible = false
+                onBedtime(true, minutes * 60)
+            },
+            onStop = {
+                bedtimeDialogVisible = false
+                onBedtime(false, null)
+            },
+        )
+    }
+
+    if (sleepDialogVisible) {
+        AlertDialog(
+            onDismissRequest = { sleepDialogVisible = false },
+            icon = { Icon(Icons.Rounded.PowerSettingsNew, null) },
+            title = { Text("Box schlafen legen?") },
+            text = {
+                Text(
+                    if (runtime.bedtime.isActive) {
+                        "Die Box blendet den Ton kurz aus und wechselt anschließend in den Schlafzustand."
+                    } else {
+                        "TeddyRemote aktiviert kurz den Bedtime-Modus mit fünf Minuten und sendet nach dessen Bestätigung den Schlafbefehl."
+                    },
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    sleepDialogVisible = false
+                    onSleep()
+                }) { Text("Schlafen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { sleepDialogVisible = false }) { Text("Abbrechen") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun BedtimeDialog(
+    active: Boolean,
+    remainingSeconds: Long?,
+    initialMinutes: Int,
+    onDismiss: () -> Unit,
+    onStart: (Int) -> Unit,
+    onStop: () -> Unit,
+) {
+    var minutes by remember(initialMinutes) { mutableFloatStateOf(initialMinutes.toFloat()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Bedtime, null) },
+        title = { Text(if (active) "Bedtime-Modus" else "Bedtime starten") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (active) {
+                    Text(
+                        remainingSeconds?.let { "Verbleibend: ${formatCountdown(it)}" } ?: "Bedtime ist aktiv.",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                Text("Dauer: ${minutes.roundToInt()} Minuten")
+                Slider(
+                    value = minutes,
+                    onValueChange = {
+                        minutes = ((it / BEDTIME_MINUTES_STEP).roundToInt() * BEDTIME_MINUTES_STEP)
+                            .coerceIn(BEDTIME_MINUTES_MIN, BEDTIME_MINUTES_MAX)
+                            .toFloat()
+                    },
+                    valueRange = BEDTIME_MINUTES_MIN.toFloat()..BEDTIME_MINUTES_MAX.toFloat(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    BEDTIME_PRESETS.forEach { preset ->
+                        AssistChip(
+                            onClick = { minutes = preset.toFloat() },
+                            label = { Text("$preset min") },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onStart(minutes.roundToInt()) }) {
+                Text(if (active) "Neu starten" else "Starten")
+            }
+        },
+        dismissButton = {
+            Row {
+                if (active) TextButton(onClick = onStop) { Text("Beenden") }
+                TextButton(onClick = onDismiss) { Text("Abbrechen") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun rememberBedtimeRemaining(bedtime: BedtimeRuntime): Long? {
+    val remaining by produceState<Long?>(
+        initialValue = bedtime.remainingSeconds(),
+        bedtime.state,
+        bedtime.duration,
+        bedtime.until,
+        bedtime.updatedAt,
+    ) {
+        while (bedtime.isActive) {
+            value = bedtime.remainingSeconds()
+            if (value == 0L) break
+            delay(1_000)
+        }
+    }
+    return remaining
 }
 
 @Composable
@@ -418,6 +609,8 @@ private fun currentTrackTitle(model: BoxUiModel): String {
     return model.metadata?.playlist?.getOrNull(chapter)?.title ?: "Kapitel ${chapter + 1}"
 }
 
+private val RUID_PATTERN = Regex("^[0-9A-Fa-f]{16}$")
+
 private fun relativeLastSeen(epochSeconds: Long): String {
     if (epochSeconds <= 0) return "unbekannt"
     val seconds = (System.currentTimeMillis() / 1_000 - epochSeconds).coerceAtLeast(0)
@@ -433,6 +626,14 @@ private fun relativeLastSeen(epochSeconds: Long): String {
 
 private fun formatDuration(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
 
+private fun formatCountdown(seconds: Long): String {
+    val hours = seconds / 3_600
+    val minutes = (seconds % 3_600) / 60
+    val remainder = seconds % 60
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, remainder)
+    else "%d:%02d".format(minutes, remainder)
+}
+
 private fun isRemoteControlVisible(online: Boolean, lastConnection: Long): Boolean {
     if (online) return true
     if (lastConnection <= 0L) return false
@@ -441,3 +642,7 @@ private fun isRemoteControlVisible(online: Boolean, lastConnection: Long): Boole
 }
 
 private const val REMOTE_CONTROL_GRACE_SECONDS = 3 * 60L
+private const val BEDTIME_MINUTES_MIN = 5
+private const val BEDTIME_MINUTES_MAX = 24 * 60
+private const val BEDTIME_MINUTES_STEP = 5
+private val BEDTIME_PRESETS = listOf(5, 15, 30, 60, 120)

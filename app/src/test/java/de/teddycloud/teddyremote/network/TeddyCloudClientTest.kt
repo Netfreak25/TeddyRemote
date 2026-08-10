@@ -31,7 +31,7 @@ class TeddyCloudClientTest {
     fun `loads runtime snapshot and generation setting`() = runTest {
         server.enqueue(
             MockResponse().setBody(
-                """{"boxes":[{"ID":"D4594404DEAC","commonName":"D4594404DEAC","boxName":"Blau","boxModel":"tb2-blue","runtime":{"online":true,"playback":{"valid":true,"status":"playing","ruid":"28F28F11500304E0"},"volume":{"valid":true,"level":5}}}]}""",
+                """{"boxes":[{"ID":"D4594404DEAC","commonName":"D4594404DEAC","boxName":"Blau","boxModel":"tb2-blue","runtime":{"online":true,"controls":{"bedtime":true,"sleep":true},"playback":{"valid":true,"status":"playing","ruid":"28F28F11500304E0"},"volume":{"valid":true,"level":5}}}]}""",
             ),
         )
         server.enqueue(MockResponse().setBody("2"))
@@ -41,6 +41,8 @@ class TeddyCloudClientTest {
 
         assertTrue(box.runtime.playback.isPlaying)
         assertEquals(5, box.runtime.volume.level)
+        assertTrue(box.runtime.controls.bedtime)
+        assertTrue(box.runtime.controls.sleep)
         assertEquals(2, generation)
         assertEquals("/api/getBoxes", server.takeRequest().path)
         assertEquals("/api/settings/get/toniebox.boxGeneration?overlay=D4594404DEAC", server.takeRequest().path)
@@ -56,6 +58,30 @@ class TeddyCloudClientTest {
         assertTrue(response.ok)
         assertEquals("/api/box/volume?overlay=D4594404DEAC", request.path)
         assertEquals("{\"level\":10}", request.body.readUtf8())
+    }
+
+    @Test
+    fun `sends bedtime and sleep commands with exact payloads`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"ok":true,"message":"bedtime queued"}"""))
+        server.enqueue(MockResponse().setBody("""{"ok":true,"message":"sleep queued"}"""))
+        server.enqueue(MockResponse().setBody("""{"ok":true,"message":"bedtime stopped"}"""))
+
+        assertTrue(client.setBedtime("D4594404DEAC", 300).ok)
+        assertTrue(client.sleep("D4594404DEAC").ok)
+        assertTrue(client.cancelBedtime("D4594404DEAC").ok)
+
+        server.takeRequest().let { request ->
+            assertEquals("/api/box/bedtime?overlay=D4594404DEAC", request.path)
+            assertEquals("{\"state\":\"on\",\"duration\":300}", request.body.readUtf8())
+        }
+        server.takeRequest().let { request ->
+            assertEquals("/api/box/sleep?overlay=D4594404DEAC", request.path)
+            assertEquals("{}", request.body.readUtf8())
+        }
+        server.takeRequest().let { request ->
+            assertEquals("/api/box/bedtime?overlay=D4594404DEAC", request.path)
+            assertEquals("{\"state\":\"off\"}", request.body.readUtf8())
+        }
     }
 
     @Test
@@ -87,6 +113,33 @@ class TeddyCloudClientTest {
         assertEquals("Originalserie", metadata.subtitle)
         assertEquals(server.url("/original.png").toString(), metadata.pictureUrl)
         assertEquals(listOf("Eigenes Kapitel 1", "Eigenes Kapitel 2"), metadata.playlist.map { it.title })
+    }
+
+    @Test
+    fun `uses track starts as chapter fallback for regular content`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"tagInfo":{"tonieInfo":{"episode":"Original"},"trackSeconds":[0,61,125]}}""",
+            ),
+        )
+
+        val metadata = client.getTonieMetadata("D4594404DEAC", "28F28F11500304E0", 44)
+
+        assertEquals(listOf("Kapitel 1", "Kapitel 2", "Kapitel 3"), metadata.playlist.map { it.title })
+        assertEquals(listOf(61L, 64L, null), metadata.playlist.map { it.durationSeconds })
+    }
+
+    @Test
+    fun `empty playlist tracks do not hide source tracks`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"tagInfo":{"playlist":{"tracks":[]},"sourceInfo":{"tracks":["Quelle 1","Quelle 2"]}}}""",
+            ),
+        )
+
+        val metadata = client.getTonieMetadata("D4594404DEAC", "28F28F11500304E0", 45)
+
+        assertEquals(listOf("Quelle 1", "Quelle 2"), metadata.playlist.map { it.title })
     }
 
     @Test

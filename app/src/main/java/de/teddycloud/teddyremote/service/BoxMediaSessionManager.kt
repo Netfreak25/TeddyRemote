@@ -21,6 +21,9 @@ import de.teddycloud.teddyremote.R
 import de.teddycloud.teddyremote.model.BoxUiModel
 import de.teddycloud.teddyremote.repository.TeddyRemoteRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
@@ -35,6 +38,7 @@ class BoxMediaSessionManager(
     private val mediaRouter = MediaRouter.getInstance(context)
     private val routeProvider = TeddyRemoteMediaRouteProvider(context, ::setRouteVolume)
     private var selectedRouteBoxId: String? = null
+    private var bedtimeTicker: Job? = null
 
     init {
         mediaRouter.addProvider(routeProvider)
@@ -53,6 +57,7 @@ class BoxMediaSessionManager(
             if (imageUrl != null && imageUrl != session.artworkUrl) loadArtwork(session, imageUrl)
         }
         updateMediaRoute(eligible)
+        updateBedtimeTicker()
     }
 
     fun handleAction(boxId: String, action: String) {
@@ -69,6 +74,7 @@ class BoxMediaSessionManager(
     }
 
     fun release() {
+        bedtimeTicker?.cancel()
         clearSelectedMediaRoute()
         routeProvider.update(emptyList())
         mediaRouter.removeProvider(routeProvider)
@@ -129,6 +135,8 @@ class BoxMediaSessionManager(
         val playback = model.box.runtime.playback
         val chapterIndex = playback.chapter?.coerceAtLeast(0) ?: 0
         val track = model.metadata?.playlist?.getOrNull(chapterIndex)
+        val bedtime = bedtimeLabel(model)
+        val boxName = model.box.boxName.ifBlank { model.box.commonName }
         val state = when (playback.status.lowercase()) {
             "playing" -> PlaybackState.STATE_PLAYING
             "paused" -> PlaybackState.STATE_PAUSED
@@ -158,7 +166,7 @@ class BoxMediaSessionManager(
             MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, track?.title ?: "Kapitel ${chapterIndex + 1}")
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, model.metadata?.title ?: playback.tonie ?: "Tonie")
-                .putString(MediaMetadata.METADATA_KEY_ALBUM, model.box.boxName.ifBlank { model.box.commonName })
+                .putString(MediaMetadata.METADATA_KEY_ALBUM, listOfNotNull(boxName, bedtime).joinToString(" · "))
                 .putLong(MediaMetadata.METADATA_KEY_TRACK_NUMBER, chapterIndex.toLong() + 1)
                 .putLong(MediaMetadata.METADATA_KEY_NUM_TRACKS, model.metadata?.playlist?.size?.toLong() ?: 0L)
                 .apply { session.artwork?.let { putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it) } }
@@ -182,11 +190,14 @@ class BoxMediaSessionManager(
     private fun updateNotification(session: BoxSession, artwork: Bitmap?) {
         val model = session.model
         val playing = model.box.runtime.playback.isPlaying
+        val chapter = model.metadata?.playlist?.getOrNull(model.box.runtime.playback.chapter ?: 0)?.title
+        val bedtime = bedtimeLabel(model)
+        val subText = listOfNotNull(chapter, bedtime).joinToString(" · ")
         val builder = Notification.Builder(context, TeddyRemoteService.CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(model.metadata?.title ?: model.box.runtime.playback.tonie ?: "Tonie")
             .setContentText(model.box.boxName.ifBlank { model.box.commonName })
-            .setSubText(model.metadata?.playlist?.getOrNull(model.box.runtime.playback.chapter ?: 0)?.title)
+            .setSubText(subText.takeIf { it.isNotBlank() })
             .setContentIntent(openBoxIntent(model.box.id))
             .setOnlyAlertOnce(true)
             .setOngoing(playing)
@@ -269,6 +280,32 @@ class BoxMediaSessionManager(
         sessions[boxId.uppercase()]?.let { setVolume(it, value) }
     }
 
+    private fun updateBedtimeTicker() {
+        val needed = sessions.values.any { it.model.box.runtime.bedtime.isActive }
+        if (!needed) {
+            bedtimeTicker?.cancel()
+            bedtimeTicker = null
+            return
+        }
+        if (bedtimeTicker?.isActive == true) return
+        bedtimeTicker = scope.launch {
+            while (isActive && sessions.values.any { it.model.box.runtime.bedtime.isActive }) {
+                delay(BEDTIME_MEDIA_REFRESH_MS)
+                sessions.values.filter { it.model.box.runtime.bedtime.isActive }.forEach { session ->
+                    updateSession(session)
+                    updateNotification(session, session.artwork)
+                }
+            }
+            bedtimeTicker = null
+        }
+    }
+
+    private fun bedtimeLabel(model: BoxUiModel): String? {
+        val remaining = model.box.runtime.bedtime.remainingSeconds() ?: return null
+        return if (remaining < 60) "Bedtime ${remaining}s"
+        else "Bedtime ${(remaining + 59) / 60} min"
+    }
+
     private fun updateMediaRoute(eligible: Map<String, BoxUiModel>) {
         routeProvider.update(eligible.values)
         val nextBoxId = selectMediaRouteBoxId(
@@ -345,5 +382,6 @@ class BoxMediaSessionManager(
     private companion object {
         const val MAX_BOX_VOLUME = 10
         const val MEDIA_ROUTE_PREFIX = "teddyremote:"
+        const val BEDTIME_MEDIA_REFRESH_MS = 30_000L
     }
 }

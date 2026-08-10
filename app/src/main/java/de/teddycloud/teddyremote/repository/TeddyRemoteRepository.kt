@@ -8,6 +8,7 @@ import de.teddycloud.teddyremote.model.BoxRuntime
 import de.teddycloud.teddyremote.model.BoxUiModel
 import de.teddycloud.teddyremote.model.CertificateCandidate
 import de.teddycloud.teddyremote.model.CertificateTarget
+import de.teddycloud.teddyremote.model.CommandResponse
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.ConnectionStatus
 import de.teddycloud.teddyremote.model.HeadphonesRuntime
@@ -37,6 +38,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.URI
@@ -170,7 +172,14 @@ class TeddyRemoteRepository(
     }
 
     suspend fun refresh() {
-        refreshSnapshot(loadStaticData = false)
+        refreshSnapshot(loadStaticData = false, forceMetadata = true)
+    }
+
+    suspend fun refreshMetadata(boxId: String) {
+        val client = api ?: return
+        updateBox(boxId) { model ->
+            model.copy(metadata = metadataFor(client, model.box, model.metadata, force = true))
+        }
     }
 
     suspend fun playback(boxId: String, action: String, chapter: Int? = null) {
@@ -183,6 +192,24 @@ class TeddyRemoteRepository(
 
     suspend fun ping(boxId: String) {
         issueCommand(boxId, "ping") { client -> client.ping(boxId) }
+    }
+
+    suspend fun setBedtime(boxId: String, enabled: Boolean, durationSeconds: Int? = null) {
+        issueCommand(boxId, if (enabled) "bedtime:start" else "bedtime:stop") { client ->
+            if (enabled) client.setBedtime(boxId, requireNotNull(durationSeconds))
+            else client.cancelBedtime(boxId)
+        }
+    }
+
+    suspend fun sleep(boxId: String) {
+        issueCommand(boxId, "sleep") { client ->
+            val bedtimeActive = box(boxId)?.box?.runtime?.bedtime?.isActive == true
+            if (!bedtimeActive) {
+                client.setBedtime(boxId, SHUTDOWN_BEDTIME_SECONDS).requireAccepted()
+                awaitBedtimeActive(boxId)
+            }
+            client.sleep(boxId)
+        }
     }
 
     suspend fun setRingBrightness(boxId: String, brightness: Int) {
@@ -199,7 +226,7 @@ class TeddyRemoteRepository(
     ) {
         val client = api ?: return
         updateBox(boxId) { it.copy(pendingCommand = command, commandError = null) }
-        runCatching { operation(client) }
+        runCatching { operation(client).also { (it as? CommandResponse)?.requireAccepted() } }
             .onFailure { error ->
                 updateBox(boxId) { it.copy(pendingCommand = null, commandError = error.userMessage()) }
                 return
@@ -209,6 +236,18 @@ class TeddyRemoteRepository(
             .onFailure { error -> updateBox(boxId) { it.copy(commandError = error.userMessage()) } }
         updateBox(boxId) { it.copy(pendingCommand = null) }
     }
+
+    private suspend fun awaitBedtimeActive(boxId: String) {
+        withTimeout(BEDTIME_CONFIRM_TIMEOUT_MS) {
+            while (box(boxId)?.box?.runtime?.bedtime?.isActive != true) {
+                delay(BEDTIME_CONFIRM_POLL_MS)
+                refreshSnapshot(loadStaticData = false)
+            }
+        }
+    }
+
+    private fun box(boxId: String): BoxUiModel? =
+        _boxes.value.firstOrNull { it.box.id.equals(boxId, ignoreCase = true) }
 
     private suspend fun beginConnection(profile: ConnectionProfile) {
         volumeCommands.cancelAll()
@@ -305,7 +344,10 @@ class TeddyRemoteRepository(
         }
     }
 
-    private suspend fun refreshSnapshot(loadStaticData: Boolean) {
+    private suspend fun refreshSnapshot(
+        loadStaticData: Boolean,
+        forceMetadata: Boolean = false,
+    ) {
         val client = api ?: return
         val snapshot = client.getBoxes()
         val tb2Boxes = coroutineScope {
@@ -324,7 +366,7 @@ class TeddyRemoteRepository(
             tb2Boxes.map { box ->
                 async {
                     val old = previous[box.id.uppercase()]
-                    val metadata = metadataFor(client, box, old?.metadata)
+                    val metadata = metadataFor(client, box, old?.metadata, forceMetadata)
                     val brightness = old?.ringBrightness ?: runCatching { client.getRingBrightness(box.id) }.getOrNull()
                     val catalogImage = old?.boxImageUrl
                         ?: catalog[box.boxModel.lowercase()]?.imageUrl?.let(client::resolveUrl)
@@ -347,17 +389,18 @@ class TeddyRemoteRepository(
         client: TeddyCloudClient,
         box: TonieboxDto,
         existing: TonieMetadata?,
+        force: Boolean = false,
     ): TonieMetadata? {
         val ruid = box.runtime.playback.ruid?.takeIf { it.matches(Regex("^[0-9A-Fa-f]{16}$")) } ?: return null
         val key = ruid.uppercase() to box.runtime.playback.contentVersion
-        if (metadataKeys[box.id.uppercase()] == key && existing != null) return existing
+        if (!force && metadataKeys[box.id.uppercase()] == key && existing != null) return existing
         return runCatching {
             val metadata = client.getTonieMetadata(box.id, ruid, key.second)
             metadata.copy(pictureUrl = imageCache.materialize(metadata.pictureUrl, client))
         }
             .onSuccess { metadataKeys[box.id.uppercase()] = key }
             .getOrElse {
-                TonieMetadata(
+                existing?.takeIf { it.ruid.equals(key.first, ignoreCase = true) } ?: TonieMetadata(
                     ruid = key.first,
                     title = box.runtime.playback.tonie ?: "Tonie",
                     playlist = box.runtime.playback.chapter?.let { chapter ->
@@ -440,6 +483,7 @@ class TeddyRemoteRepository(
     private suspend fun applyMqttEvent(event: MqttBoxEvent) {
         val valueEvent = event as? MqttBoxEvent.Value ?: return
         var metadataChanged = false
+        var forceMetadataRefresh = false
         var confirmedVolume: Int? = null
         updateBox(valueEvent.boxId) { model ->
             val old = model.box
@@ -447,14 +491,23 @@ class TeddyRemoteRepository(
             val runtime = BoxStateReducer.reduce(old.runtime, valueEvent.field, valueEvent.value, now)
             metadataChanged = old.runtime.playback.ruid != runtime.playback.ruid ||
                 old.runtime.playback.contentVersion != runtime.playback.contentVersion
+            forceMetadataRefresh = valueEvent.field == "PlaybackChapter" &&
+                model.metadata?.playlist.isNullOrEmpty()
             if (valueEvent.field == "VolumeLevel") confirmedVolume = runtime.volume.level
             model.copy(box = old.copy(runtime = runtime), commandError = null)
         }
         confirmedVolume?.let { volumeCommands.confirm(valueEvent.boxId, it) }
-        if (metadataChanged) {
+        if (metadataChanged || forceMetadataRefresh) {
             val client = api ?: return
             updateBox(valueEvent.boxId) { model ->
-                model.copy(metadata = metadataFor(client, model.box, model.metadata))
+                model.copy(
+                    metadata = metadataFor(
+                        client,
+                        model.box,
+                        model.metadata,
+                        force = forceMetadataRefresh,
+                    ),
+                )
             }
         }
     }
@@ -498,9 +551,16 @@ class TeddyRemoteRepository(
     private companion object {
         const val TB2_GENERATION = 2
         const val COMMAND_REFRESH_DELAY_MS = 500L
+        const val SHUTDOWN_BEDTIME_SECONDS = 300
+        const val BEDTIME_CONFIRM_TIMEOUT_MS = 8_000L
+        const val BEDTIME_CONFIRM_POLL_MS = 400L
         const val MQTT_RECONCILIATION_MS = 60_000L
         const val FOREGROUND_POLL_MS = 2_000L
         const val BACKGROUND_PLAYING_POLL_MS = 5_000L
         const val BACKGROUND_IDLE_POLL_MS = 15_000L
     }
+}
+
+private fun CommandResponse.requireAccepted() {
+    check(ok) { error ?: message ?: "TeddyCloud hat den Befehl abgelehnt" }
 }

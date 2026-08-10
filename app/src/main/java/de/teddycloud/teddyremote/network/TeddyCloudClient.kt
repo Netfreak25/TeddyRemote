@@ -68,6 +68,24 @@ class TeddyCloudClient private constructor(
 
     suspend fun ping(overlay: String): CommandResponse = parseCommand(api.ping(overlay))
 
+    suspend fun setBedtime(overlay: String, durationSeconds: Int): CommandResponse {
+        require(durationSeconds in BEDTIME_DURATION_MIN..BEDTIME_DURATION_MAX) {
+            "Bedtime-Dauer muss zwischen 300 und 86400 Sekunden liegen"
+        }
+        return parseCommand(
+            api.bedtime(
+                overlay,
+                """{"state":"on","duration":$durationSeconds}""".toRequestBody(JSON_MEDIA),
+            ),
+        )
+    }
+
+    suspend fun cancelBedtime(overlay: String): CommandResponse =
+        parseCommand(api.bedtime(overlay, """{"state":"off"}""".toRequestBody(JSON_MEDIA)))
+
+    suspend fun sleep(overlay: String): CommandResponse =
+        parseCommand(api.sleep(overlay, "{}".toRequestBody(JSON_MEDIA)))
+
     suspend fun getTonieMetadata(overlay: String, ruid: String, contentVersion: Long?): TonieMetadata {
         val root = networkJson.parseToJsonElement(api.getTagInfo(ruid, overlay, contentVersion).string()).jsonObject
         val tag = root["tagInfo"]?.jsonObject ?: JsonObject(emptyMap())
@@ -82,18 +100,24 @@ class TeddyCloudClient private constructor(
             ?: tag.string("model")
             ?: "Tonie"
         val subtitle = info.string("series") ?: sourceInfo.string("series") ?: ""
-        val tracks = playlist?.get("tracks")?.asStrings()
-            ?: sourceInfo["tracks"]?.asStrings()
-            ?: info["tracks"]?.asStrings()
-            ?: emptyList()
-        val durations = playlist?.get("durations")?.asLongs() ?: emptyList()
-        val count = playlist?.get("chapterCount")?.jsonPrimitive?.intOrNull
-            ?: tracks.size
+        val tracks = listOf(
+            playlist?.get("tracks")?.asStrings().orEmpty(),
+            sourceInfo["tracks"]?.asStrings().orEmpty(),
+            info["tracks"]?.asStrings().orEmpty(),
+        ).firstOrNull(List<String>::isNotEmpty).orEmpty()
+        val durations = playlist?.get("durations")?.asLongs().orEmpty()
+        val trackStarts = tag["trackSeconds"]?.asLongs().orEmpty()
+        val count = maxOf(
+            playlist?.get("chapterCount")?.jsonPrimitive?.intOrNull ?: 0,
+            tracks.size,
+            trackStarts.size,
+        )
         val normalizedTracks = (0 until count.coerceAtLeast(tracks.size)).map { index ->
             PlaylistTrack(
                 index = index,
                 title = tracks.getOrNull(index)?.takeIf(String::isNotBlank) ?: "Kapitel ${index + 1}",
-                durationSeconds = durations.getOrNull(index),
+                durationSeconds = durations.getOrNull(index)
+                    ?: chapterDurationFromStarts(trackStarts, index),
             )
         }
         return TonieMetadata(
@@ -158,6 +182,8 @@ class TeddyCloudClient private constructor(
         private const val BOX_GENERATION_SETTING = "toniebox.boxGeneration"
         private const val RING_BRIGHTNESS_SETTING = "toniebox2.lightring_brightness"
         private const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
+        private const val BEDTIME_DURATION_MIN = 300
+        private const val BEDTIME_DURATION_MAX = 86_400
         private val externalImageHttpClient = OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(12, TimeUnit.SECONDS)
@@ -210,3 +236,9 @@ private fun JsonElement.asStrings(): List<String> =
 
 private fun JsonElement.asLongs(): List<Long> =
     runCatching { jsonArray.mapNotNull { it.jsonPrimitive.longOrNull } }.getOrDefault(emptyList())
+
+private fun chapterDurationFromStarts(starts: List<Long>, index: Int): Long? {
+    val start = starts.getOrNull(index) ?: return null
+    val next = starts.getOrNull(index + 1) ?: return null
+    return (next - start).takeIf { it >= 0 }
+}

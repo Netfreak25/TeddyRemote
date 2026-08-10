@@ -17,13 +17,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Fingerprint
@@ -107,7 +107,7 @@ fun SettingsScreen(
     onActivate: (String) -> Unit,
     onTheme: (ThemeMode) -> Unit,
     onDiagnostics: () -> Unit,
-    onExportMqttGuide: () -> Unit,
+    onOpenMqttGuide: () -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<ConnectionProfile?>(null) }
     Column(Modifier.fillMaxSize()) {
@@ -274,7 +274,7 @@ fun SettingsScreen(
 
             Text("Anleitungen", style = MaterialTheme.typography.titleLarge)
             Card(
-                onClick = onExportMqttGuide,
+                onClick = onOpenMqttGuide,
                 shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -288,12 +288,12 @@ fun SettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("MQTT-Server konfigurieren", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Offline-Anleitung als HTML-Datei speichern",
+                            "Lokale Offline-Anleitung im Browser öffnen",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Icon(Icons.Rounded.Download, "HTML herunterladen", tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, "Im Browser öffnen", tint = MaterialTheme.colorScheme.primary)
                 }
             }
             Spacer(Modifier.height(20.dp))

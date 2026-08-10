@@ -52,4 +52,16 @@ internal interface TeddyCloudApi {
 
     @POST("api/box/ping")
     suspend fun ping(@Query("overlay") overlay: String): ResponseBody
+
+    @POST("api/box/bedtime")
+    suspend fun bedtime(
+        @Query("overlay") overlay: String,
+        @Body command: RequestBody,
+    ): ResponseBody
+
+    @POST("api/box/sleep")
+    suspend fun sleep(
+        @Query("overlay") overlay: String,
+        @Body command: RequestBody,
+    ): ResponseBody
 }

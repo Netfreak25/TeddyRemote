@@ -132,6 +132,10 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun refreshPlaylist(boxId: String) {
+        viewModelScope.launch { container.repository.refreshMetadata(boxId) }
+    }
+
     fun playback(boxId: String, action: String, chapter: Int? = null) {
         viewModelScope.launch { container.repository.playback(boxId, action, chapter) }
     }
@@ -142,6 +146,14 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     fun ping(boxId: String) {
         viewModelScope.launch { container.repository.ping(boxId) }
+    }
+
+    fun setBedtime(boxId: String, enabled: Boolean, durationSeconds: Int?) {
+        viewModelScope.launch { container.repository.setBedtime(boxId, enabled, durationSeconds) }
+    }
+
+    fun sleep(boxId: String) {
+        viewModelScope.launch { container.repository.sleep(boxId) }
     }
 
     fun setBrightness(boxId: String, level: Int) {

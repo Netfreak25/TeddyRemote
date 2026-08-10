@@ -3,6 +3,8 @@ package de.teddycloud.teddyremote.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import java.time.Instant
+import java.time.OffsetDateTime
 
 @Serializable
 data class BoxesResponse(val boxes: List<TonieboxDto> = emptyList())
@@ -34,6 +36,7 @@ data class BoxControls(
     val volume: Boolean = false,
     val ping: Boolean = false,
     val bedtime: Boolean = false,
+    val sleep: Boolean = false,
 )
 
 @Serializable
@@ -82,7 +85,27 @@ data class BedtimeRuntime(
     val duration: Int? = null,
     val defaultDuration: Int? = null,
     val until: String? = null,
-)
+) {
+    val isActive: Boolean
+        get() = state.equals("on", ignoreCase = true) || state.equals("active", ignoreCase = true)
+
+    /** Returns the confirmed remaining bedtime duration, never an optimistic command value. */
+    fun remainingSeconds(nowEpochSeconds: Long = System.currentTimeMillis() / 1_000): Long? {
+        if (!isActive) return null
+        val deadline = until?.let(::parseBedtimeDeadline)
+        if (deadline != null) return (deadline - nowEpochSeconds).coerceAtLeast(0)
+        val total = duration?.toLong()?.takeIf { it >= 0 } ?: return null
+        return (total - (nowEpochSeconds - updatedAt).coerceAtLeast(0)).coerceAtLeast(0)
+    }
+}
+
+private fun parseBedtimeDeadline(value: String): Long? {
+    value.toLongOrNull()?.let { raw ->
+        return if (raw > 10_000_000_000L) raw / 1_000 else raw
+    }
+    return runCatching { Instant.parse(value).epochSecond }.getOrNull()
+        ?: runCatching { OffsetDateTime.parse(value).toEpochSecond() }.getOrNull()
+}
 
 @Serializable
 data class CommandResponse(

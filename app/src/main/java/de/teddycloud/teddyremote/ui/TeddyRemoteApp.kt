@@ -1,5 +1,6 @@
 package de.teddycloud.teddyremote.ui
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -17,30 +18,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.io.File
 
 @Composable
 fun TeddyRemoteApp(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val mqttGuideExporter = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/html"),
-    ) { destination ->
-        if (destination == null) return@rememberLauncherForActivityResult
-        val result = runCatching {
-            context.assets.open(MQTT_GUIDE_ASSET).use { source ->
-                requireNotNull(context.contentResolver.openOutputStream(destination)).use(source::copyTo)
-            }
-        }
-        Toast.makeText(
-            context,
-            if (result.isSuccess) "MQTT-Anleitung gespeichert" else "Anleitung konnte nicht gespeichert werden",
-            Toast.LENGTH_SHORT,
-        ).show()
-    }
     TeddyRemoteTheme(state.profiles.themeMode) {
         val showNavigation = !state.needsOnboarding && state.screen in setOf(AppScreen.HOME, AppScreen.SETTINGS)
         Scaffold(
@@ -94,9 +80,7 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                         onActivate = viewModel::activateProfile,
                         onTheme = viewModel::setTheme,
                         onDiagnostics = { viewModel.navigate(AppScreen.DIAGNOSTICS) },
-                        onExportMqttGuide = {
-                            mqttGuideExporter.launch("TeddyRemote-MQTT-Server-konfigurieren.html")
-                        },
+                        onOpenMqttGuide = { openMqttGuide(context) },
                     )
                     else -> HomeScreen(
                         state = state,
@@ -104,8 +88,11 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                         onConnect = viewModel::connect,
                         onOpenSettings = { viewModel.navigate(AppScreen.SETTINGS) },
                         onPlayback = viewModel::playback,
+                        onRefreshPlaylist = viewModel::refreshPlaylist,
                         onVolume = viewModel::setVolume,
                         onPing = viewModel::ping,
+                        onBedtime = viewModel::setBedtime,
+                        onSleep = viewModel::sleep,
                         onBrightness = viewModel::setBrightness,
                     )
                 }
@@ -123,6 +110,24 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
 }
 
 private const val MQTT_GUIDE_ASSET = "guides/mqtt-server-konfigurieren.html"
+private const val MQTT_GUIDE_FILE = "TeddyRemote-MQTT-Server-konfigurieren.html"
+
+private fun openMqttGuide(context: android.content.Context) {
+    val result = runCatching {
+        val guideDirectory = File(context.cacheDir, "guides").apply { mkdirs() }
+        val guide = File(guideDirectory, MQTT_GUIDE_FILE)
+        context.assets.open(MQTT_GUIDE_ASSET).use { source -> guide.outputStream().use(source::copyTo) }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", guide)
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "text/html")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+        )
+    }
+    if (result.isFailure) {
+        Toast.makeText(context, "Die MQTT-Anleitung konnte nicht im Browser geöffnet werden", Toast.LENGTH_SHORT).show()
+    }
+}
 
 @Composable
 private fun CertificateDialog(

@@ -5,10 +5,11 @@ TeddyRemote ist eine moderne native Android-App zur Fernsteuerung von Toniebox-2
 ## Funktionsumfang
 
 - adaptive TB2-Karten mit Boxname, Boxbild, Onlinezustand und „Zuletzt gesehen“
-- Akku-, Kopfhörer- und Bedtime-Status
+- Akku-, Kopfhörer- und sekundengenauer Bedtime-Status
 - physischer Tonie mit Bild, RUID, Titel, Kapitel und Laufzeit
 - Previous, Play/Pause, Next und Kapitelauswahl
 - Lautstärkeregelung von 0 bis 10
+- Bedtime starten, neu setzen oder abbrechen sowie bestätigtes zweistufiges Schlafenlegen
 - optionale Ringhelligkeit
 - Android-Mediensteuerung für aktive TB2 – ohne lokale Audiowiedergabe
 - mehrere speicherbare TeddyCloud-/MQTT-Verbindungsprofile
@@ -55,7 +56,7 @@ https://192.168.1.100:8443/
 
 Ein Profil kann zusätzlich Host, Port, Prefix, TLS, Benutzername und Passwort des externen MQTT-Brokers enthalten. API und MQTT lassen sich im Profildialog getrennt prüfen.
 
-Die App enthält unter **Einstellungen → Anleitungen → MQTT-Server konfigurieren** eine exportierbare HTML-Anleitung für einen kleinen TLS-gesicherten Mosquitto-Broker.
+Die App enthält unter **Einstellungen → Anleitungen → MQTT-Server konfigurieren** eine lokale HTML-Anleitung für einen kleinen TLS-gesicherten Mosquitto-Broker. Sie wird direkt im installierten Browser geöffnet und benötigt keine Internetverbindung.
 
 ## Projektstruktur
 
