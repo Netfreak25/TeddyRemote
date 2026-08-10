@@ -336,10 +336,14 @@ class TeddyRemoteRepository(
                     profile,
                     password,
                     onEvent = { event ->
-                        if (snapshotReady.get()) scope.launch { applyMqttEvent(event) }
+                        if (snapshotReady.get()) launchMqttCallback("MQTT-Ereignis") { applyMqttEvent(event) }
                         else bufferedEvents += event
                     },
-                    onDisconnected = { error -> scope.launch { handleMqttDisconnect(profile, error) } },
+                    onDisconnected = { error ->
+                        launchMqttCallback("MQTT-Verbindungsabbruch") {
+                            handleMqttDisconnect(profile, error)
+                        }
+                    },
                 )
             }.onFailure { mqttFailure = it }
         }
@@ -463,7 +467,7 @@ class TeddyRemoteRepository(
     }
 
     private suspend fun handleMqttDisconnect(profile: ConnectionProfile, error: Throwable?) {
-        if (!_connection.value.desiredConnected) return
+        if (!_connection.value.desiredConnected || activeProfile?.id != profile.id) return
         _connection.value = _connection.value.copy(
             mqttStatus = LinkStatus.ERROR,
             message = error?.userMessage() ?: "MQTT-Verbindung getrennt",
@@ -472,6 +476,7 @@ class TeddyRemoteRepository(
     }
 
     private fun startMqttReconnect(profile: ConnectionProfile, password: String?) {
+        if (activeProfile?.id != profile.id) return
         if (mqttReconnectJob?.isActive == true) return
         mqttReconnectJob = scope.launch {
             var attempt = 0
@@ -482,8 +487,14 @@ class TeddyRemoteRepository(
                     mqtt.connect(
                         profile,
                         password,
-                        onEvent = { event -> scope.launch { applyMqttEvent(event) } },
-                        onDisconnected = { error -> scope.launch { handleMqttDisconnect(profile, error) } },
+                        onEvent = { event ->
+                            launchMqttCallback("MQTT-Ereignis") { applyMqttEvent(event) }
+                        },
+                        onDisconnected = { error ->
+                            launchMqttCallback("MQTT-Verbindungsabbruch") {
+                                handleMqttDisconnect(profile, error)
+                            }
+                        },
                     )
                     _connection.value = _connection.value.copy(mqttStatus = LinkStatus.CONNECTED, message = null)
                     refreshSnapshot(loadStaticData = false)
@@ -504,6 +515,21 @@ class TeddyRemoteRepository(
                     if (profile.maxRetries > 0 && attempt >= profile.maxRetries) return@launch
                     delay(backoffPolicy.delayMillis(attempt, profile.initialRetrySeconds, profile.maxRetrySeconds))
                 }
+            }
+        }
+    }
+
+    private fun launchMqttCallback(label: String, block: suspend () -> Unit) {
+        scope.launch {
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                _connection.value = _connection.value.copy(
+                    mqttStatus = LinkStatus.WARNING,
+                    message = "$label fehlgeschlagen: ${error.userMessage()}",
+                )
             }
         }
     }

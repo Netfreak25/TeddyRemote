@@ -1,5 +1,6 @@
 package de.teddycloud.teddyremote.mqtt
 
+import android.util.Log
 import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.MqttClientSslConfig
 import com.hivemq.client.mqtt.datatypes.MqttQos
@@ -20,6 +21,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.TrustManagerFactory
@@ -33,8 +35,9 @@ class CertificateConfirmationRequired(val candidate: CertificateCandidate) : Exc
 class MqttConnection(
     private val certificateProbe: CertificateProbe = CertificateProbe(),
 ) {
+    @Volatile
     private var client: Mqtt3AsyncClient? = null
-    private var manuallyDisconnected = false
+    private val connectionEpoch = AtomicLong()
 
     suspend fun connect(
         profile: ConnectionProfile,
@@ -43,14 +46,18 @@ class MqttConnection(
         onDisconnected: (Throwable?) -> Unit,
     ) {
         disconnect()
-        manuallyDisconnected = false
+        val epoch = connectionEpoch.incrementAndGet()
+        var callbackClient: Mqtt3AsyncClient? = null
         var builder = MqttClient.builder()
             .useMqttVersion3()
             .identifier(profile.mqttClientId)
             .serverHost(profile.mqttHost)
             .serverPort(profile.mqttPort)
             .addDisconnectedListener { context ->
-                if (!manuallyDisconnected) onDisconnected(context.cause)
+                if (connectionEpoch.get() == epoch && client === callbackClient) {
+                    runCatching { onDisconnected(context.cause) }
+                        .onFailure { Log.w(LOG_TAG, "MQTT disconnect callback failed", it) }
+                }
             }
 
         if (profile.mqttTls) {
@@ -64,6 +71,7 @@ class MqttConnection(
         }
 
         val mqttClient = builder.buildAsync()
+        callbackClient = mqttClient
         client = mqttClient
         val connect = mqttClient.connectWith().cleanSession(true).keepAlive(30)
         val configuredConnect = if (profile.mqttUsername.isNotBlank()) {
@@ -80,7 +88,7 @@ class MqttConnection(
     }
 
     suspend fun disconnect() {
-        manuallyDisconnected = true
+        connectionEpoch.incrementAndGet()
         val current = client
         client = null
         if (current != null && current.state.isConnected) {
@@ -99,7 +107,9 @@ class MqttConnection(
             .qos(MqttQos.AT_LEAST_ONCE)
             .build()
         client.subscribe(subscription) { publish ->
-            MqttTopicParser.parse(prefix, publish.topic.toString(), publish.payloadAsBytes)?.let(onEvent)
+            runCatching {
+                MqttTopicParser.parse(prefix, publish.topic.toString(), publish.payloadAsBytes)?.let(onEvent)
+            }.onFailure { Log.w(LOG_TAG, "MQTT publish callback failed for ${publish.topic}", it) }
         }.await()
     }
 
@@ -139,6 +149,10 @@ class MqttConnection(
                 }
             }.isSuccess
         }
+
+    private companion object {
+        const val LOG_TAG = "MqttConnection"
+    }
 }
 
 private suspend fun <T> CompletableFuture<T>.await(): T = suspendCancellableCoroutine { continuation ->

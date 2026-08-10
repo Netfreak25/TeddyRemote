@@ -2,6 +2,7 @@ package de.teddycloud.teddyremote.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -209,8 +210,8 @@ private fun TonieboxCard(
     val bedtimeRemaining = rememberBedtimeRemaining(runtime.bedtime)
     Card(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
-        colors = if (highlighted) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        else CardDefaults.cardColors(),
+        colors = CardDefaults.cardColors(),
+        border = if (highlighted) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
         elevation = CardDefaults.cardElevation(defaultElevation = if (highlighted) 8.dp else 2.dp),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
