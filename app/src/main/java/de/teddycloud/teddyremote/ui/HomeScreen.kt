@@ -169,13 +169,14 @@ private fun TonieboxCard(
 ) {
     var playlistExpanded by remember(model.box.id) { mutableStateOf(false) }
     var deviceExpanded by remember(model.box.id) { mutableStateOf(false) }
-    var volume by remember(model.box.id, model.box.runtime.volume.level) {
-        mutableFloatStateOf((model.box.runtime.volume.level ?: 0).toFloat())
+    val runtime = model.box.runtime
+    val displayVolume = model.desiredVolume ?: runtime.volume.level ?: 0
+    var volume by remember(model.box.id, displayVolume) {
+        mutableFloatStateOf(displayVolume.toFloat())
     }
     var brightness by remember(model.box.id, model.ringBrightness) {
         mutableFloatStateOf((model.ringBrightness ?: 100).toFloat())
     }
-    val runtime = model.box.runtime
     val remoteControlVisible = isRemoteControlVisible(runtime.online, runtime.lastConnection)
     Card(
         modifier = Modifier.fillMaxWidth().animateContentSize(),

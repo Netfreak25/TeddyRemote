@@ -68,6 +68,25 @@ class TeddyRemoteRepository(
     private val metadataKeys = mutableMapOf<String, Pair<String, Long?>>()
     private val boxUpdateMutex = Mutex()
     private val imageCache = RemoteImageCache(context)
+    private val volumeCommands = VolumeCommandCoordinator(
+        scope = scope,
+        send = { boxId, level ->
+            val client = api ?: error("Keine API-Verbindung")
+            val response = client.setVolume(boxId, level)
+            check(response.ok) { response.error ?: response.message ?: "Lautstärkebefehl wurde abgelehnt" }
+        },
+        refreshConfirmed = { boxId ->
+            refreshSnapshot(loadStaticData = false)
+            _boxes.value.firstOrNull { it.box.id.equals(boxId, ignoreCase = true) }
+                ?.box?.runtime?.volume?.level
+        },
+        onDesiredChanged = { boxId, level ->
+            updateBox(boxId) { it.copy(desiredVolume = level, commandError = null) }
+        },
+        onSettled = { boxId, error ->
+            updateBox(boxId) { it.copy(desiredVolume = null, commandError = error) }
+        },
+    )
 
     suspend fun autoStartIfConfigured() {
         val state = profilesStore.state.first()
@@ -86,6 +105,7 @@ class TeddyRemoteRepository(
 
     suspend fun disconnect() {
         profilesStore.setConnectionRequested(false)
+        volumeCommands.cancelAll()
         connectionJob?.cancelAndJoin()
         pollingJob?.cancelAndJoin()
         mqttReconnectJob?.cancelAndJoin()
@@ -158,7 +178,7 @@ class TeddyRemoteRepository(
     }
 
     suspend fun setVolume(boxId: String, level: Int) {
-        issueCommand(boxId, "volume") { client -> client.setVolume(boxId, level) }
+        volumeCommands.submit(boxId, level)
     }
 
     suspend fun ping(boxId: String) {
@@ -191,6 +211,7 @@ class TeddyRemoteRepository(
     }
 
     private suspend fun beginConnection(profile: ConnectionProfile) {
+        volumeCommands.cancelAll()
         connectionJob?.cancelAndJoin()
         pollingJob?.cancelAndJoin()
         mqttReconnectJob?.cancelAndJoin()
@@ -312,6 +333,7 @@ class TeddyRemoteRepository(
                         metadata = metadata,
                         boxImageUrl = imageCache.materialize(catalogImage, client),
                         ringBrightness = brightness,
+                        desiredVolume = old?.desiredVolume,
                         pendingCommand = old?.pendingCommand,
                         commandError = old?.commandError,
                     )
@@ -418,14 +440,17 @@ class TeddyRemoteRepository(
     private suspend fun applyMqttEvent(event: MqttBoxEvent) {
         val valueEvent = event as? MqttBoxEvent.Value ?: return
         var metadataChanged = false
+        var confirmedVolume: Int? = null
         updateBox(valueEvent.boxId) { model ->
             val old = model.box
             val now = event.timestampMillis / 1_000
             val runtime = BoxStateReducer.reduce(old.runtime, valueEvent.field, valueEvent.value, now)
             metadataChanged = old.runtime.playback.ruid != runtime.playback.ruid ||
                 old.runtime.playback.contentVersion != runtime.playback.contentVersion
+            if (valueEvent.field == "VolumeLevel") confirmedVolume = runtime.volume.level
             model.copy(box = old.copy(runtime = runtime), commandError = null)
         }
+        confirmedVolume?.let { volumeCommands.confirm(valueEvent.boxId, it) }
         if (metadataChanged) {
             val client = api ?: return
             updateBox(valueEvent.boxId) { model ->

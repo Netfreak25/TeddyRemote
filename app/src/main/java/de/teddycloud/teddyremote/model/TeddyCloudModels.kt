@@ -114,6 +114,7 @@ data class BoxUiModel(
     val metadata: TonieMetadata? = null,
     val boxImageUrl: String? = null,
     val ringBrightness: Int? = null,
+    val desiredVolume: Int? = null,
     val pendingCommand: String? = null,
     val commandError: String? = null,
 )

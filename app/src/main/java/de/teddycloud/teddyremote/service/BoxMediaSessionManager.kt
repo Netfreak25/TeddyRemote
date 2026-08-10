@@ -160,7 +160,9 @@ class BoxMediaSessionManager(
                 )
             },
         )
-        val volume = model.box.runtime.volume.level?.coerceIn(0, MAX_BOX_VOLUME) ?: 0
+        val volume = (model.desiredVolume ?: model.box.runtime.volume.level)
+            ?.coerceIn(0, MAX_BOX_VOLUME)
+            ?: 0
         if (volume != session.volumeProvider.currentVolume) session.volumeProvider.setCurrentVolume(volume)
         session.mediaSession.isActive = true
     }
