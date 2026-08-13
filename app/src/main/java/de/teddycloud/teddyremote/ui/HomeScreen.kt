@@ -36,7 +36,6 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.AssistChip
@@ -93,8 +92,7 @@ import kotlin.math.roundToInt
 fun HomeScreen(
     state: MainUiState,
     onRefresh: () -> Unit,
-    onConnect: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenOverview: () -> Unit,
     onPlayback: (String, String, Int?) -> Unit,
     onRefreshPlaylist: (String) -> Unit,
     onVolume: (String, Int) -> Unit,
@@ -122,7 +120,6 @@ fun HomeScreen(
                     Spacer(Modifier.width(6.dp))
                     ConnectionBadge(state.connection.mqttStatus, "MQTT")
                 }
-                IconButton(onClick = onOpenSettings) { Icon(Icons.Rounded.Settings, "Einstellungen") }
             },
             windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         )
@@ -131,14 +128,14 @@ fun HomeScreen(
             !state.connection.desiredConnected -> ConnectionEmptyState(
                 title = "Nicht verbunden",
                 detail = "Wähle ein Profil und verbinde dich mit deiner TeddyCloud.",
-                action = "Verbinden",
-                onAction = onConnect,
+                action = "Zur Übersicht",
+                onAction = onOpenOverview,
             )
             !state.connection.isApiUsable -> ConnectionEmptyState(
                 title = "TeddyCloud nicht erreichbar",
                 detail = state.connection.message ?: "Verbindung wird hergestellt …",
-                action = "Erneut versuchen",
-                onAction = onConnect,
+                action = "Zur Übersicht",
+                onAction = onOpenOverview,
             )
             else -> PullToRefreshBox(
                 isRefreshing = state.isRefreshing,
@@ -199,10 +196,9 @@ private fun TonieboxCard(
     var bedtimeDialogVisible by remember(model.box.id) { mutableStateOf(false) }
     var sleepDialogVisible by remember(model.box.id) { mutableStateOf(false) }
     val runtime = model.box.runtime
-    val displayVolume = model.desiredVolume ?: runtime.volume.level ?: 0
-    var volume by remember(model.box.id, displayVolume) {
-        mutableFloatStateOf(displayVolume.toFloat())
-    }
+    val confirmedVolume = model.desiredVolume ?: runtime.volume.level ?: 0
+    var draggedVolume by remember(model.box.id) { mutableStateOf<Float?>(null) }
+    val volume = draggedVolume ?: confirmedVolume.toFloat()
     var brightness by remember(model.box.id, model.ringBrightness) {
         mutableFloatStateOf((model.ringBrightness ?: 100).toFloat())
     }
@@ -361,14 +357,18 @@ private fun TonieboxCard(
                 Icon(Icons.AutoMirrored.Rounded.VolumeUp, null)
                 Slider(
                     value = volume,
-                    onValueChange = { volume = it },
-                    onValueChangeFinished = { onVolume(volume.toInt()) },
+                    onValueChange = { draggedVolume = it },
+                    onValueChangeFinished = {
+                        val requestedVolume = volume.roundToInt().coerceIn(MIN_VOLUME, MAX_VOLUME)
+                        draggedVolume = null
+                        onVolume(requestedVolume)
+                    },
                     enabled = runtime.controls.volume && model.pendingCommand == null,
                     valueRange = 0f..10f,
                     steps = 9,
                     modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
                 )
-                Text(volume.toInt().toString(), style = MaterialTheme.typography.labelLarge)
+                Text(volume.roundToInt().toString(), style = MaterialTheme.typography.labelLarge)
             }
 
             model.commandError?.let {
@@ -777,6 +777,8 @@ private fun currentTrackTitle(model: BoxUiModel): String {
 }
 
 private val RUID_PATTERN = Regex("^[0-9A-Fa-f]{16}$")
+private const val MIN_VOLUME = 0
+private const val MAX_VOLUME = 10
 
 private fun relativeLastSeen(epochSeconds: Long): String {
     if (epochSeconds <= 0) return "unbekannt"

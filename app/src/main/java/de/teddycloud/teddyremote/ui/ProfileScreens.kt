@@ -30,7 +30,6 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Warning
@@ -100,8 +99,6 @@ fun OnboardingScreen(onCreateProfile: () -> Unit) {
 @Composable
 fun SettingsScreen(
     state: MainUiState,
-    onConnect: () -> Unit,
-    onDisconnect: () -> Unit,
     onEdit: (ConnectionProfile?) -> Unit,
     onAdd: () -> Unit,
     onDuplicate: (String) -> Unit,
@@ -121,51 +118,6 @@ fun SettingsScreen(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Icon(
-                        Icons.Rounded.PowerSettingsNew,
-                        null,
-                        Modifier.size(28.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            state.profiles.activeProfile?.name ?: "Kein aktives Profil",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            ConnectionBadge(state.connection.apiStatus, "API")
-                            if (state.profiles.activeProfile?.mqttEnabled == true) {
-                                ConnectionBadge(state.connection.mqttStatus, "MQTT")
-                            }
-                        }
-                        state.connection.message?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    if (state.connection.desiredConnected) {
-                        OutlinedButton(onClick = onDisconnect) { Text("Trennen") }
-                    } else {
-                        Button(onClick = onConnect, enabled = state.profiles.activeProfile != null) { Text("Verbinden") }
-                    }
-                }
-            }
-
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Serverprofile", style = MaterialTheme.typography.titleLarge)

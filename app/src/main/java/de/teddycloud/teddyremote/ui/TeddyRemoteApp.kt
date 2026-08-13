@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
@@ -28,11 +29,21 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     TeddyRemoteTheme(state.profiles.themeMode) {
-        val showNavigation = !state.needsOnboarding && state.screen in setOf(AppScreen.HOME, AppScreen.SETTINGS)
+        val showNavigation = !state.needsOnboarding && state.screen in setOf(
+            AppScreen.OVERVIEW,
+            AppScreen.HOME,
+            AppScreen.SETTINGS,
+        )
         Scaffold(
             bottomBar = {
                 if (showNavigation) {
                     NavigationBar {
+                        NavigationBarItem(
+                            selected = state.screen == AppScreen.OVERVIEW,
+                            onClick = { viewModel.navigate(AppScreen.OVERVIEW) },
+                            icon = { Icon(Icons.Rounded.Dashboard, null) },
+                            label = { Text("Übersicht") },
+                        )
                         NavigationBarItem(
                             selected = state.screen == AppScreen.HOME,
                             onClick = { viewModel.navigate(AppScreen.HOME) },
@@ -60,7 +71,7 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                         apiTest = state.apiTest,
                         mqttTest = state.mqttTest,
                         mqttImport = state.mqttImport,
-                        onBack = { viewModel.navigate(if (state.needsOnboarding) AppScreen.HOME else AppScreen.SETTINGS) },
+                        onBack = { viewModel.navigate(if (state.needsOnboarding) AppScreen.OVERVIEW else AppScreen.SETTINGS) },
                         onSave = viewModel::saveProfile,
                         onTestApi = viewModel::testApi,
                         onTestMqtt = viewModel::testMqtt,
@@ -73,8 +84,6 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                     )
                     state.screen == AppScreen.SETTINGS -> SettingsScreen(
                         state = state,
-                        onConnect = viewModel::connect,
-                        onDisconnect = viewModel::disconnect,
                         onEdit = viewModel::editProfile,
                         onAdd = { viewModel.editProfile(null) },
                         onDuplicate = viewModel::duplicateProfile,
@@ -84,11 +93,17 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                         onDiagnostics = { viewModel.navigate(AppScreen.DIAGNOSTICS) },
                         onOpenMqttGuide = { openMqttGuide(context) },
                     )
+                    state.screen == AppScreen.OVERVIEW -> ConnectionOverviewScreen(
+                        state = state,
+                        onConnect = viewModel::connect,
+                        onDisconnect = viewModel::disconnect,
+                        onOpenBoxes = { viewModel.navigate(AppScreen.HOME) },
+                        onOpenSettings = { viewModel.navigate(AppScreen.SETTINGS) },
+                    )
                     else -> HomeScreen(
                         state = state,
                         onRefresh = viewModel::refresh,
-                        onConnect = viewModel::connect,
-                        onOpenSettings = { viewModel.navigate(AppScreen.SETTINGS) },
+                        onOpenOverview = { viewModel.navigate(AppScreen.OVERVIEW) },
                         onPlayback = viewModel::playback,
                         onRefreshPlaylist = viewModel::refreshPlaylist,
                         onVolume = viewModel::setVolume,

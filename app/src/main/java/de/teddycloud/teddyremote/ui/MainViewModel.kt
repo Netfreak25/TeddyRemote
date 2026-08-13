@@ -17,10 +17,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-enum class AppScreen { HOME, SETTINGS, DIAGNOSTICS, PROFILE_EDITOR }
+enum class AppScreen { OVERVIEW, HOME, SETTINGS, DIAGNOSTICS, PROFILE_EDITOR }
 
 data class ProfileTestState(
     val status: LinkStatus = LinkStatus.NOT_CHECKED,
@@ -38,7 +39,7 @@ data class MainUiState(
     val profiles: ProfilesState = ProfilesState(),
     val connection: ConnectionStatus = ConnectionStatus(),
     val boxes: List<BoxUiModel> = emptyList(),
-    val screen: AppScreen = AppScreen.HOME,
+    val screen: AppScreen = AppScreen.OVERVIEW,
     val editingProfile: ConnectionProfile? = null,
     val editingPassword: String = "",
     val apiTest: ProfileTestState = ProfileTestState(),
@@ -104,9 +105,13 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     fun saveProfile(profile: ConnectionProfile, password: String, connectAfterSave: Boolean) {
         viewModelScope.launch {
+            val wasOnboarding = container.profilesStore.state.first().profiles.isEmpty()
             val saved = container.profilesStore.saveProfile(profile, password)
             container.profilesStore.activateProfile(saved.id)
-            transient.value = transient.value.copy(screen = AppScreen.SETTINGS, editingProfile = null)
+            transient.value = transient.value.copy(
+                screen = if (wasOnboarding) AppScreen.OVERVIEW else AppScreen.SETTINGS,
+                editingProfile = null,
+            )
             if (connectAfterSave) container.repository.connect()
         }
     }
@@ -275,7 +280,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private data class TransientState(
-        val screen: AppScreen = AppScreen.HOME,
+        val screen: AppScreen = AppScreen.OVERVIEW,
         val editingProfile: ConnectionProfile? = null,
         val editingPassword: String = "",
         val apiTest: ProfileTestState = ProfileTestState(),
