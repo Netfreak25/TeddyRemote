@@ -25,25 +25,40 @@ data class ConnectionProfile(
     val mqttClientId: String = "teddyremote-${UUID.randomUUID()}",
     val connectOnAppStart: Boolean = true,
     val autoReconnect: Boolean = true,
+    val homeSsidPrimary: String = "",
+    val homeSsidSecondary: String = "",
+    val reconnectOnWifiReconnect: Boolean = true,
     val maxRetries: Int = 0,
     val initialRetrySeconds: Int = 2,
     val maxRetrySeconds: Int = 30,
     val apiCertificateFingerprint: String? = null,
     val mqttCertificateFingerprint: String? = null,
 ) {
-    fun normalized(): ConnectionProfile = copy(
-        name = name.trim(),
-        apiBaseUrl = normalizeBaseUrl(apiBaseUrl),
-        mqttHost = mqttHost.trim(),
-        mqttPrefix = mqttPrefix.trim().trim('/').ifBlank { "teddyCloud" },
-        mqttUsername = mqttUsername.trim(),
-        mqttPort = mqttPort.coerceIn(1, 65_535),
-        maxRetries = maxRetries.coerceAtLeast(0),
-        initialRetrySeconds = initialRetrySeconds.coerceIn(1, 300),
-        maxRetrySeconds = maxRetrySeconds.coerceAtLeast(initialRetrySeconds).coerceAtMost(3_600),
-        apiCertificateFingerprint = apiCertificateFingerprint?.normalizeFingerprint(),
-        mqttCertificateFingerprint = mqttCertificateFingerprint?.normalizeFingerprint(),
-    )
+    fun normalized(): ConnectionProfile {
+        val primarySsid = homeSsidPrimary.trim()
+        val secondarySsid = homeSsidSecondary.trim().takeUnless { it == primarySsid }.orEmpty()
+        return copy(
+            name = name.trim(),
+            apiBaseUrl = normalizeBaseUrl(apiBaseUrl),
+            mqttHost = mqttHost.trim(),
+            mqttPrefix = mqttPrefix.trim().trim('/').ifBlank { "teddyCloud" },
+            mqttUsername = mqttUsername.trim(),
+            homeSsidPrimary = primarySsid,
+            homeSsidSecondary = secondarySsid,
+            mqttPort = mqttPort.coerceIn(1, 65_535),
+            maxRetries = maxRetries.coerceAtLeast(0),
+            initialRetrySeconds = initialRetrySeconds.coerceIn(1, 300),
+            maxRetrySeconds = maxRetrySeconds.coerceAtLeast(initialRetrySeconds).coerceAtMost(3_600),
+            apiCertificateFingerprint = apiCertificateFingerprint?.normalizeFingerprint(),
+            mqttCertificateFingerprint = mqttCertificateFingerprint?.normalizeFingerprint(),
+        )
+    }
+
+    /** Configured SSIDs in matching order. SSID comparisons intentionally remain case-sensitive. */
+    val homeSsids: List<String>
+        get() = listOf(homeSsidPrimary.trim(), homeSsidSecondary.trim())
+            .filter(String::isNotBlank)
+            .distinct()
 
     fun validate(): List<String> = buildList {
         val profile = normalized()

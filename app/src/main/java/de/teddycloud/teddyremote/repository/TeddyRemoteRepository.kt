@@ -20,6 +20,8 @@ import de.teddycloud.teddyremote.model.PlaybackRuntime
 import de.teddycloud.teddyremote.model.TonieMetadata
 import de.teddycloud.teddyremote.model.TonieboxDto
 import de.teddycloud.teddyremote.model.VolumeRuntime
+import de.teddycloud.teddyremote.model.WifiGateState
+import de.teddycloud.teddyremote.model.userMessage
 import de.teddycloud.teddyremote.mqtt.CertificateConfirmationRequired
 import de.teddycloud.teddyremote.mqtt.MqttConnection
 import de.teddycloud.teddyremote.network.CertificateProbe
@@ -37,6 +39,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -68,6 +72,8 @@ class TeddyRemoteRepository(
     private var pollingJob: Job? = null
     private var mqttReconnectJob: Job? = null
     private var activeProfile: ConnectionProfile? = null
+    private var lastWifiGate = WifiGateState.NO_WIFI
+    private val connectionLifecycleMutex = Mutex()
     private val knownGenerations = mutableMapOf<String, Int>()
     private val metadataKeys = mutableMapOf<String, Pair<String, Long?>>()
     private val boxUpdateMutex = Mutex()
@@ -95,6 +101,17 @@ class TeddyRemoteRepository(
         },
     )
 
+    init {
+        scope.launch {
+            combine(networkMonitor.state, profilesStore.state) { wifi, profiles -> wifi to profiles }
+                .collect { (wifi, profiles) ->
+                    val profile = profiles.activeProfile?.normalized()
+                    val gate = profile?.let { evaluateWifiGate(wifi, it) } ?: WifiGateState.NO_WIFI
+                    handleWifiUpdate(profile, gate, profiles.connectionRequested)
+                }
+        }
+    }
+
     suspend fun autoStartIfConfigured() {
         val state = profilesStore.state.first()
         if (state.activeProfile?.connectOnAppStart == true) connect()
@@ -105,25 +122,26 @@ class TeddyRemoteRepository(
     }
 
     suspend fun connect() {
-        val profile = profilesStore.state.first().activeProfile ?: return
+        val profile = profilesStore.state.first().activeProfile?.normalized() ?: return
+        networkMonitor.refresh()
+        connectionLifecycleMutex.withLock { activeProfile = profile }
         profilesStore.setConnectionRequested(true)
-        beginConnection(profile)
+        reconcileWifi(profile, networkMonitor.gate(profile), requested = true)
     }
 
     suspend fun disconnect() {
         profilesStore.setConnectionRequested(false)
-        volumeCommands.cancelAll()
-        connectionJob?.cancelAndJoin()
-        pollingJob?.cancelAndJoin()
-        mqttReconnectJob?.cancelAndJoin()
-        mqtt.disconnect()
-        api = null
-        activeProfile = null
-        _connection.value = ConnectionStatus(
-            desiredConnected = false,
-            apiStatus = LinkStatus.DISCONNECTED,
-            mqttStatus = LinkStatus.DISCONNECTED,
-        )
+        connectionLifecycleMutex.withLock {
+            stopNetworkJobsLocked()
+            activeProfile = null
+            networkMonitor.releaseBinding()
+            _connection.value = ConnectionStatus(
+                desiredConnected = false,
+                apiStatus = LinkStatus.DISCONNECTED,
+                mqttStatus = LinkStatus.DISCONNECTED,
+                wifiGate = _connection.value.wifiGate,
+            )
+        }
     }
 
     suspend fun switchProfile(profileId: String) {
@@ -139,8 +157,7 @@ class TeddyRemoteRepository(
             CertificateTarget.MQTT -> profile.copy(mqttCertificateFingerprint = candidate.fingerprintSha256)
         }
         profilesStore.saveProfile(updated, null)
-        profilesStore.setConnectionRequested(true)
-        beginConnection(updated)
+        connect()
     }
 
     suspend fun rejectCertificate() {
@@ -151,40 +168,53 @@ class TeddyRemoteRepository(
     }
 
     suspend fun testApi(profile: ConnectionProfile): Result<Unit> = runCatching {
-        require(profile.validate().isEmpty()) { profile.validate().joinToString() }
-        TeddyCloudClient.create(profile.normalized()).getBoxes()
+        withWifiAccess(profile) {
+            require(profile.validate().isEmpty()) { profile.validate().joinToString() }
+            TeddyCloudClient.create(profile.normalized()).getBoxes()
+        }
     }
 
     suspend fun importMqttSettings(profile: ConnectionProfile): Result<MqttSettingsImport> = runCatching {
-        require(profile.validate().none { it.startsWith("TeddyCloud-URL") }) {
-            "TeddyCloud-URL ist ungültig"
+        withWifiAccess(profile) {
+            require(profile.validate().none { it.startsWith("TeddyCloud-URL") }) {
+                "TeddyCloud-URL ist ungültig"
+            }
+            TeddyCloudClient.create(profile.normalized()).getMqttSettingsForRemote()
         }
-        TeddyCloudClient.create(profile.normalized()).getMqttSettingsForRemote()
     }
 
     suspend fun testMqtt(profile: ConnectionProfile, password: String?): Result<Unit> = runCatching {
-        if (!profile.mqttEnabled) return@runCatching
-        val connection = MqttConnection(certificateProbe)
-        try {
-            connection.connect(profile.normalized(), password, {}, {})
-        } finally {
-            connection.disconnect()
+        withWifiAccess(profile) {
+            if (!profile.mqttEnabled) return@withWifiAccess
+            val connection = MqttConnection(certificateProbe)
+            try {
+                connection.connect(profile.normalized(), password, {}, {})
+            } finally {
+                connection.disconnect()
+            }
         }
     }
 
     suspend fun inspectCertificate(profile: ConnectionProfile, target: CertificateTarget): CertificateCandidate {
-        val normalized = profile.normalized()
-        return when (target) {
-            CertificateTarget.API -> {
-                val uri = URI(normalized.apiBaseUrl)
-                certificateProbe.inspect(target, uri.host, if (uri.port > 0) uri.port else 443)
+        return withWifiAccess(profile) {
+            val normalized = profile.normalized()
+            when (target) {
+                CertificateTarget.API -> {
+                    val uri = URI(normalized.apiBaseUrl)
+                    certificateProbe.inspect(target, uri.host, if (uri.port > 0) uri.port else 443)
+                }
+                CertificateTarget.MQTT -> certificateProbe.inspect(target, normalized.mqttHost, normalized.mqttPort)
             }
-            CertificateTarget.MQTT -> certificateProbe.inspect(target, normalized.mqttHost, normalized.mqttPort)
         }
+    }
+
+    fun refreshWifiAccess() {
+        networkMonitor.refresh()
     }
 
     suspend fun refresh() {
         try {
+            requireActiveWifi()
             refreshSnapshot(loadStaticData = false, forceMetadata = true)
             val current = _connection.value
             _connection.value = current.copy(
@@ -286,12 +316,134 @@ class TeddyRemoteRepository(
     private fun box(boxId: String): BoxUiModel? =
         _boxes.value.firstOrNull { it.box.id.equals(boxId, ignoreCase = true) }
 
-    private suspend fun beginConnection(profile: ConnectionProfile) {
+    private suspend fun handleWifiUpdate(
+        profile: ConnectionProfile?,
+        gate: WifiGateState,
+        requested: Boolean,
+    ) {
+        val returnedToApprovedWifi = shouldResumeAfterWifiTransition(lastWifiGate, gate, requested)
+        lastWifiGate = gate
+        if (profile == null) {
+            _connection.value = _connection.value.copy(wifiGate = gate)
+            return
+        }
+        val currentProfile = activeProfile
+        if (currentProfile == null || currentProfile.id != profile.id) {
+            if (!_connection.value.desiredConnected) {
+                _connection.value = _connection.value.copy(
+                    profileName = profile.name,
+                    wifiGate = gate,
+                    message = gate.takeUnless { it == WifiGateState.AVAILABLE }?.userMessage,
+                )
+            }
+            return
+        }
+        activeProfile = profile
+        reconcileWifi(profile, gate, requested, allowStart = returnedToApprovedWifi)
+    }
+
+    private suspend fun reconcileWifi(
+        profile: ConnectionProfile,
+        gate: WifiGateState,
+        requested: Boolean,
+        allowStart: Boolean = true,
+    ) {
+        var clearConnectionRequest = false
+        connectionLifecycleMutex.withLock {
+            if (gate != WifiGateState.AVAILABLE) {
+                val keepRequested = keepConnectionRequestWhilePaused(requested, profile.reconnectOnWifiReconnect)
+                pauseForWifiLocked(profile, gate, keepRequested)
+                clearConnectionRequest = requested && !keepRequested
+                return@withLock
+            }
+            if (!requested) {
+                _connection.value = _connection.value.copy(
+                    desiredConnected = false,
+                    profileName = profile.name,
+                    wifiGate = gate,
+                    message = null,
+                )
+                return@withLock
+            }
+            if (!networkMonitor.bindToApprovedWifi(profile)) {
+                pauseForWifiLocked(profile, WifiGateState.NO_WIFI, profile.reconnectOnWifiReconnect)
+                clearConnectionRequest = !profile.reconnectOnWifiReconnect
+                return@withLock
+            }
+            _connection.value = _connection.value.copy(
+                desiredConnected = true,
+                profileName = profile.name,
+                wifiGate = WifiGateState.AVAILABLE,
+            )
+            if (allowStart && !_connection.value.isApiUsable && connectionJob?.isActive != true) {
+                beginConnectionLocked(profile)
+            }
+        }
+        if (clearConnectionRequest) profilesStore.setConnectionRequested(false)
+    }
+
+    private suspend fun pauseForWifiLocked(
+        profile: ConnectionProfile,
+        gate: WifiGateState,
+        keepRequested: Boolean,
+    ) {
+        stopNetworkJobsLocked()
+        networkMonitor.releaseBinding()
+        _boxes.value = _boxes.value.map { model ->
+            model.copy(
+                box = model.box.copy(runtime = model.box.runtime.copy(online = false)),
+                desiredVolume = null,
+                pendingCommand = null,
+            )
+        }
+        _connection.value = ConnectionStatus(
+            desiredConnected = keepRequested,
+            apiStatus = LinkStatus.DISCONNECTED,
+            mqttStatus = if (profile.mqttEnabled) LinkStatus.DISCONNECTED else LinkStatus.NOT_CHECKED,
+            profileName = profile.name,
+            message = if (keepRequested) "Pausiert · ${gate.userMessage}" else gate.userMessage,
+            wifiGate = gate,
+        )
+    }
+
+    private suspend fun stopNetworkJobsLocked() {
         volumeCommands.cancelAll()
         connectionJob?.cancelAndJoin()
+        connectionJob = null
         pollingJob?.cancelAndJoin()
+        pollingJob = null
         mqttReconnectJob?.cancelAndJoin()
+        mqttReconnectJob = null
         mqtt.disconnect()
+        api = null
+    }
+
+    private fun requireWifiAccess(profile: ConnectionProfile) {
+        val gate = networkMonitor.gate(profile)
+        if (gate != WifiGateState.AVAILABLE || !networkMonitor.bindToApprovedWifi(profile)) {
+            throw WifiAccessException(gate.takeUnless { it == WifiGateState.AVAILABLE } ?: WifiGateState.NO_WIFI)
+        }
+    }
+
+    private fun requireActiveWifi() {
+        requireWifiAccess(activeProfile ?: throw IllegalStateException("Keine aktive TeddyCloud-Verbindung"))
+    }
+
+    private suspend fun <T> withWifiAccess(profile: ConnectionProfile, operation: suspend () -> T): T {
+        val normalized = profile.normalized()
+        networkMonitor.refresh()
+        requireWifiAccess(normalized)
+        return try {
+            operation()
+        } finally {
+            if (!_connection.value.desiredConnected || activeProfile?.id != normalized.id) {
+                networkMonitor.releaseBinding()
+            }
+        }
+    }
+
+    private suspend fun beginConnectionLocked(profile: ConnectionProfile) {
+        stopNetworkJobsLocked()
         knownGenerations.clear()
         metadataKeys.clear()
         activeProfile = profile.normalized()
@@ -301,7 +453,7 @@ class TeddyRemoteRepository(
     private suspend fun connectionLoop(profile: ConnectionProfile) {
         var attempt = 0
         while (scope.isActive && profilesStore.state.first().connectionRequested) {
-            networkMonitor.available.first { it }
+            requireWifiAccess(profile)
             attempt++
             _connection.value = ConnectionStatus(
                 desiredConnected = true,
@@ -309,6 +461,7 @@ class TeddyRemoteRepository(
                 mqttStatus = if (profile.mqttEnabled) LinkStatus.CONNECTING else LinkStatus.NOT_CHECKED,
                 profileName = profile.name,
                 retryAttempt = attempt,
+                wifiGate = WifiGateState.AVAILABLE,
             )
             try {
                 connectOnce(profile)
@@ -337,13 +490,14 @@ class TeddyRemoteRepository(
     }
 
     private suspend fun connectOnce(profile: ConnectionProfile) {
+        requireWifiAccess(profile)
         val password = profilesStore.mqttPassword(profile.id)
         val bufferedEvents = Collections.synchronizedList(mutableListOf<MqttBoxEvent>())
         val snapshotReady = AtomicBoolean(false)
         var mqttFailure: Throwable? = null
 
         if (profile.mqttEnabled) {
-            runCatching {
+            try {
                 mqtt.connect(
                     profile,
                     password,
@@ -357,9 +511,14 @@ class TeddyRemoteRepository(
                         }
                     },
                 )
-            }.onFailure { mqttFailure = it }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                mqttFailure = error
+            }
         }
 
+        requireWifiAccess(profile)
         api = TeddyCloudClient.create(profile)
         refreshSnapshot(loadStaticData = true)
         snapshotReady.set(true)
@@ -378,6 +537,7 @@ class TeddyRemoteRepository(
             profileName = profile.name,
             message = mqttFailure?.userMessage(),
             certificateCandidate = candidate,
+            wifiGate = WifiGateState.AVAILABLE,
         )
         startPolling()
         if (mqttFailure != null && candidate == null && profile.autoReconnect) {
@@ -467,19 +627,24 @@ class TeddyRemoteRepository(
                     else -> BACKGROUND_IDLE_POLL_MS
                 }
                 delay(interval)
-                runCatching { refreshSnapshot(loadStaticData = false) }
-                    .onFailure { error ->
+                try {
+                    requireActiveWifi()
+                    refreshSnapshot(loadStaticData = false)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
                         _connection.value = _connection.value.copy(
                             apiStatus = LinkStatus.ERROR,
                             message = error.userMessage(),
                         )
-                    }
+                }
             }
         }
     }
 
     private suspend fun handleMqttDisconnect(profile: ConnectionProfile, error: Throwable?) {
         if (!_connection.value.desiredConnected || activeProfile?.id != profile.id) return
+        if (networkMonitor.gate(profile) != WifiGateState.AVAILABLE) return
         _connection.value = _connection.value.copy(
             mqttStatus = LinkStatus.ERROR,
             message = error?.userMessage() ?: "MQTT-Verbindung getrennt",
@@ -493,7 +658,7 @@ class TeddyRemoteRepository(
         mqttReconnectJob = scope.launch {
             var attempt = 0
             while (isActive && profilesStore.state.first().connectionRequested) {
-                networkMonitor.available.first { it }
+                requireWifiAccess(profile)
                 attempt++
                 try {
                     mqtt.connect(
@@ -628,6 +793,8 @@ class TeddyRemoteRepository(
         const val BACKGROUND_IDLE_POLL_MS = 15_000L
     }
 }
+
+private class WifiAccessException(gate: WifiGateState) : IllegalStateException(gate.userMessage)
 
 private fun CommandResponse.requireAccepted() {
     check(ok) { error ?: message ?: "TeddyCloud hat den Befehl abgelehnt" }

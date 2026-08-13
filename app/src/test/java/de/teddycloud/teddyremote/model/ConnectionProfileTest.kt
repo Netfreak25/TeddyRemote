@@ -32,4 +32,16 @@ class ConnectionProfileTest {
         val errors = ConnectionProfile(apiBaseUrl = "https://").validate()
         assertTrue(errors.any { it.contains("URL") })
     }
+
+    @Test
+    fun `normalizes and deduplicates home ssids without changing case`() {
+        val profile = ConnectionProfile(
+            homeSsidPrimary = "  Home-WLAN  ",
+            homeSsidSecondary = "Home-WLAN",
+        ).normalized()
+
+        assertEquals("Home-WLAN", profile.homeSsidPrimary)
+        assertEquals("", profile.homeSsidSecondary)
+        assertEquals(listOf("Home-WLAN"), profile.homeSsids)
+    }
 }

@@ -25,7 +25,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.io.File
 
 @Composable
-fun TeddyRemoteApp(viewModel: MainViewModel) {
+fun TeddyRemoteApp(
+    viewModel: MainViewModel,
+    onRequestWifiPermission: () -> Unit,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     TeddyRemoteTheme(state.profiles.themeMode) {
@@ -77,6 +80,7 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                         onTestMqtt = viewModel::testMqtt,
                         onImportMqtt = viewModel::importMqttSettings,
                         onAcceptCertificate = viewModel::acceptTestCertificate,
+                        onRequestWifiPermission = onRequestWifiPermission,
                     )
                     state.screen == AppScreen.DIAGNOSTICS -> DiagnosticsScreen(
                         state = state,
@@ -97,6 +101,7 @@ fun TeddyRemoteApp(viewModel: MainViewModel) {
                         state = state,
                         onConnect = viewModel::connect,
                         onDisconnect = viewModel::disconnect,
+                        onRequestWifiPermission = onRequestWifiPermission,
                         onOpenBoxes = { viewModel.navigate(AppScreen.HOME) },
                         onOpenSettings = { viewModel.navigate(AppScreen.SETTINGS) },
                     )

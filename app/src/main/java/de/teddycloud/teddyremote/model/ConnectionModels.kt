@@ -9,6 +9,23 @@ enum class LinkStatus {
     DISCONNECTED,
 }
 
+enum class WifiGateState {
+    AVAILABLE,
+    NO_WIFI,
+    NOT_HOME_WIFI,
+    PERMISSION_REQUIRED,
+    SSID_UNAVAILABLE,
+}
+
+val WifiGateState.userMessage: String
+    get() = when (this) {
+        WifiGateState.AVAILABLE -> "WLAN verfügbar"
+        WifiGateState.NO_WIFI -> "Kein WLAN"
+        WifiGateState.NOT_HOME_WIFI -> "Nicht im Home-WLAN"
+        WifiGateState.PERMISSION_REQUIRED -> "WLAN-Zugriff erforderlich"
+        WifiGateState.SSID_UNAVAILABLE -> "WLAN-Name nicht verfügbar"
+    }
+
 data class CertificateCandidate(
     val target: CertificateTarget,
     val host: String,
@@ -28,8 +45,10 @@ data class ConnectionStatus(
     val message: String? = null,
     val retryAttempt: Int = 0,
     val certificateCandidate: CertificateCandidate? = null,
+    val wifiGate: WifiGateState = WifiGateState.NO_WIFI,
 ) {
     val isApiUsable: Boolean get() = apiStatus == LinkStatus.CONNECTED || apiStatus == LinkStatus.WARNING
+    val isWifiPaused: Boolean get() = desiredConnected && wifiGate != WifiGateState.AVAILABLE
 }
 
 sealed interface MqttBoxEvent {

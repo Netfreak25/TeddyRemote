@@ -82,6 +82,8 @@ import de.teddycloud.teddyremote.model.BoxUiModel
 import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.model.BedtimeRuntime
 import de.teddycloud.teddyremote.model.LinkStatus
+import de.teddycloud.teddyremote.model.WifiGateState
+import de.teddycloud.teddyremote.model.userMessage
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -126,6 +128,12 @@ fun HomeScreen(
         )
 
         when {
+            state.profiles.activeProfile != null && state.connection.wifiGate != WifiGateState.AVAILABLE -> ConnectionEmptyState(
+                title = if (state.connection.desiredConnected) "Verbindung pausiert" else "WLAN nicht verfügbar",
+                detail = state.connection.wifiGate.userMessage,
+                action = "Zur Übersicht",
+                onAction = onOpenOverview,
+            )
             !state.connection.desiredConnected -> ConnectionEmptyState(
                 title = "Nicht verbunden",
                 detail = "Wähle ein Profil und verbinde dich mit deiner TeddyCloud.",

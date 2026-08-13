@@ -4,7 +4,12 @@
     <string name="service_channel_name">TeddyRemote Mediensteuerung</string>
     <string name="service_channel_description">Fernsteuerung verbundener Toniebox 2</string>
     <string name="service_connected">Mit TeddyCloud verbunden</string>
+    <string name="service_connecting">TeddyCloud wird verbunden</string>
+    <string name="service_interrupted">TeddyCloud-Verbindung unterbrochen</string>
+    <string name="service_paused">TeddyRemote pausiert</string>
     <string name="service_waiting">TeddyRemote wartet auf Boxen</string>
+    <string name="service_action_reconnect">Neu verbinden</string>
+    <string name="service_action_stop">Beenden</string>
     <string name="media_previous">Vorheriger Titel</string>
     <string name="media_play">Wiedergabe</string>
     <string name="media_pause">Pause</string>

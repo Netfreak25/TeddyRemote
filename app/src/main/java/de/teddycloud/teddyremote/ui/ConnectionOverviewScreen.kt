@@ -17,6 +17,8 @@ import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -34,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.teddycloud.teddyremote.model.LinkStatus
+import de.teddycloud.teddyremote.model.WifiGateState
+import de.teddycloud.teddyremote.model.userMessage
 
 /** Central connection surface kept separate from persistent profile settings. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,12 +46,14 @@ fun ConnectionOverviewScreen(
     state: MainUiState,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onRequestWifiPermission: () -> Unit,
     onOpenBoxes: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val profile = state.profiles.activeProfile
     val connecting = state.connection.apiStatus == LinkStatus.CONNECTING
     val onlineBoxes = state.boxes.count { it.box.runtime.online }
+    val wifiAvailable = state.connection.wifiGate == WifiGateState.AVAILABLE
 
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -101,6 +107,25 @@ fun ConnectionOverviewScreen(
                         }
                     }
 
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (wifiAvailable) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            if (state.connection.isWifiPaused) {
+                                "Pausiert · ${state.connection.wifiGate.userMessage.lowercase()}"
+                            } else {
+                                state.connection.wifiGate.userMessage
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        )
+                    }
+
                     state.connection.message?.let { message ->
                         Text(
                             message,
@@ -113,10 +138,19 @@ fun ConnectionOverviewScreen(
                         OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) {
                             Text("Verbindung trennen")
                         }
+                    } else if (
+                        state.connection.wifiGate == WifiGateState.PERMISSION_REQUIRED ||
+                        state.connection.wifiGate == WifiGateState.SSID_UNAVAILABLE
+                    ) {
+                        Button(onClick = onRequestWifiPermission, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Rounded.Wifi, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("WLAN-Zugriff prüfen")
+                        }
                     } else {
                         Button(
                             onClick = onConnect,
-                            enabled = profile != null && !connecting,
+                            enabled = profile != null && !connecting && wifiAvailable,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             if (connecting) {

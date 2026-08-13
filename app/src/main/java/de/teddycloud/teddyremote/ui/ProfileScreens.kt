@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -69,6 +70,8 @@ import de.teddycloud.teddyremote.model.CertificateCandidate
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.LinkStatus
 import de.teddycloud.teddyremote.model.ThemeMode
+import de.teddycloud.teddyremote.model.WifiGateState
+import de.teddycloud.teddyremote.model.userMessage
 
 @Composable
 fun OnboardingScreen(onCreateProfile: () -> Unit) {
@@ -291,6 +294,7 @@ fun ProfileEditorScreen(
     onTestMqtt: (ConnectionProfile, String) -> Unit,
     onImportMqtt: (ConnectionProfile) -> Unit,
     onAcceptCertificate: (CertificateCandidate) -> Unit,
+    onRequestWifiPermission: () -> Unit,
 ) {
     var profile by remember(initialProfile.id) { mutableStateOf(initialProfile) }
     var password by remember(initialProfile.id) { mutableStateOf(initialPassword) }
@@ -444,6 +448,42 @@ fun ProfileEditorScreen(
             }
 
             HorizontalDivider()
+            SectionTitle("Home-WLAN", Icons.Rounded.Wifi)
+            Text(
+                "TeddyRemote verwendet ausschließlich WLAN. Sind beide Felder leer, ist jedes WLAN erlaubt.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = profile.homeSsidPrimary,
+                onValueChange = { profile = profile.copy(homeSsidPrimary = it) },
+                label = { Text("Home-SSID 1 (optional)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = profile.homeSsidSecondary,
+                onValueChange = { profile = profile.copy(homeSsidSecondary = it) },
+                label = { Text("Home-SSID 2 (optional)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            LabeledSwitch("Bei WLAN-Rückkehr erneut verbinden", profile.reconnectOnWifiReconnect) {
+                profile = profile.copy(reconnectOnWifiReconnect = it)
+            }
+            if (profile.homeSsids.isNotEmpty()) {
+                OutlinedButton(onClick = onRequestWifiPermission, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Wifi, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("WLAN-Zugriff prüfen")
+                }
+                Text(
+                    "Die Freigabe wird nur benötigt, um den Namen des aktuell verbundenen WLANs zu vergleichen. Es findet kein Scan statt.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            HorizontalDivider()
             SectionTitle("Verbindungsverhalten", Icons.Rounded.PlayArrow)
             LabeledSwitch("Beim App-Start verbinden", profile.connectOnAppStart) {
                 profile = profile.copy(connectOnAppStart = it)
@@ -492,6 +532,12 @@ fun DiagnosticsScreen(state: MainUiState, onBack: () -> Unit) {
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            DiagnosticCard(
+                "WLAN",
+                if (state.connection.wifiGate == WifiGateState.AVAILABLE) LinkStatus.CONNECTED else LinkStatus.WARNING,
+                state.connection.wifiGate.userMessage,
+                state.connection.message?.takeIf { state.connection.isWifiPaused },
+            )
             DiagnosticCard("API", state.connection.apiStatus, state.profiles.activeProfile?.apiBaseUrl, state.connection.message)
             DiagnosticCard(
                 "MQTT",
