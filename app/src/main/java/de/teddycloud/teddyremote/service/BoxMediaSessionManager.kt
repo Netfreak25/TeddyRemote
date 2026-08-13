@@ -13,7 +13,6 @@ import android.media.session.PlaybackState
 import android.media.VolumeProvider
 import android.os.Bundle
 import androidx.core.graphics.drawable.toBitmap
-import androidx.mediarouter.media.MediaRouter
 import coil.ImageLoader
 import coil.request.ImageRequest
 import de.teddycloud.teddyremote.MainActivity
@@ -36,14 +35,7 @@ class BoxMediaSessionManager(
     private val notificationManager = context.getSystemService(NotificationManager::class.java)
     private val imageLoader = ImageLoader(context)
     private val sessions = mutableMapOf<String, BoxSession>()
-    private val mediaRouter = MediaRouter.getInstance(context)
-    private val routeProvider = TeddyRemoteMediaRouteProvider(context, ::setRouteVolume)
-    private var selectedRouteBoxId: String? = null
     private var bedtimeTicker: Job? = null
-
-    init {
-        mediaRouter.addProvider(routeProvider)
-    }
 
     fun update(boxes: List<BoxUiModel>) {
         val eligible = boxes.filter { it.box.runtime.online && it.box.runtime.controls.playback }
@@ -57,7 +49,6 @@ class BoxMediaSessionManager(
             val imageUrl = model.metadata?.pictureUrl ?: model.boxImageUrl
             if (imageUrl != null && imageUrl != session.artworkUrl) loadArtwork(session, imageUrl)
         }
-        updateMediaRoute(eligible)
         updateBedtimeTicker()
     }
 
@@ -76,9 +67,6 @@ class BoxMediaSessionManager(
 
     fun release() {
         bedtimeTicker?.cancel()
-        clearSelectedMediaRoute()
-        routeProvider.update(emptyList())
-        mediaRouter.removeProvider(routeProvider)
         sessions.keys.toList().forEach(::remove)
         imageLoader.shutdown()
     }
@@ -273,12 +261,9 @@ class BoxMediaSessionManager(
 
     private fun setVolume(session: BoxSession, value: Int) {
         val bounded = BoxVolume.clamp(value)
+        if (bounded == session.volumeProvider.currentVolume) return
         session.volumeProvider.setCurrentVolume(bounded)
         scope.launch { repository.setVolume(session.model.box.id, bounded) }
-    }
-
-    private fun setRouteVolume(boxId: String, value: Int) {
-        sessions[boxId.uppercase()]?.let { setVolume(it, value) }
     }
 
     private fun updateBedtimeTicker() {
@@ -305,38 +290,6 @@ class BoxMediaSessionManager(
         val remaining = model.box.runtime.bedtime.remainingSeconds() ?: return null
         return if (remaining < 60) "Bedtime ${remaining}s"
         else "Bedtime ${(remaining + 59) / 60} min"
-    }
-
-    private fun updateMediaRoute(eligible: Map<String, BoxUiModel>) {
-        routeProvider.update(eligible.values)
-        val nextBoxId = selectMediaRouteBoxId(
-            candidates = eligible.map { (boxId, model) ->
-                MediaRouteCandidate(
-                    boxId = boxId,
-                    isPlaying = model.box.runtime.playback.isPlaying,
-                    playbackUpdatedAt = model.box.runtime.playback.updatedAt,
-                    displayName = model.box.boxName.ifBlank { model.box.commonName.ifBlank { boxId } },
-                )
-            },
-            previousBoxId = selectedRouteBoxId,
-        )
-        if (nextBoxId == null) {
-            clearSelectedMediaRoute()
-            return
-        }
-        selectedRouteBoxId = nextBoxId
-        val routeId = routeProvider.routeId(nextBoxId)
-        val route = mediaRouter.routes.firstOrNull { it.mediaRouteDescriptor?.id == routeId } ?: return
-        if (!route.isSelected) mediaRouter.selectRoute(route)
-        mediaRouter.setMediaSession(sessions.getValue(nextBoxId).mediaSession)
-    }
-
-    private fun clearSelectedMediaRoute() {
-        mediaRouter.setMediaSession(null)
-        if (mediaRouter.selectedRoute.mediaRouteDescriptor?.id?.startsWith(MEDIA_ROUTE_PREFIX) == true) {
-            mediaRouter.selectRoute(mediaRouter.defaultRoute)
-        }
-        selectedRouteBoxId = null
     }
 
     private fun action(icon: Int, title: String, boxId: String, action: String, offset: Int): Notification.Action =
@@ -381,7 +334,6 @@ class BoxMediaSessionManager(
     )
 
     private companion object {
-        const val MEDIA_ROUTE_PREFIX = "teddyremote:"
         const val BEDTIME_MEDIA_REFRESH_MS = 30_000L
     }
 }

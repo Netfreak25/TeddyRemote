@@ -49,20 +49,35 @@ class TeddyCloudClientTest {
     }
 
     @Test
-    fun `sends bounded volume command`() = runTest {
+    fun `sends exact minimum and maximum volume commands`() = runTest {
         server.enqueue(MockResponse().setBody("""{"ok":true,"message":"queued"}"""))
         server.enqueue(MockResponse().setBody("""{"ok":true,"message":"queued"}"""))
 
-        val maximumResponse = client.setVolume("D4594404DEAC", 99)
-        val maximumRequest = server.takeRequest()
-        val minimumResponse = client.setVolume("D4594404DEAC", 0)
+        val minimumResponse = client.setVolume("D4594404DEAC", 1)
         val minimumRequest = server.takeRequest()
+        val maximumResponse = client.setVolume("D4594404DEAC", 12)
+        val maximumRequest = server.takeRequest()
 
-        assertTrue(maximumResponse.ok)
         assertTrue(minimumResponse.ok)
-        assertEquals("/api/box/volume?overlay=D4594404DEAC", maximumRequest.path)
-        assertEquals("{\"level\":11}", maximumRequest.body.readUtf8())
+        assertTrue(maximumResponse.ok)
+        assertEquals("/api/box/volume?overlay=D4594404DEAC", minimumRequest.path)
         assertEquals("{\"level\":1}", minimumRequest.body.readUtf8())
+        assertEquals("{\"level\":12}", maximumRequest.body.readUtf8())
+    }
+
+    @Test
+    fun `rejects volume outside the TB2 range before the request`() = runTest {
+        var rejected = 0
+        for (level in listOf(0, 13)) {
+            try {
+                client.setVolume("D4594404DEAC", level)
+            } catch (_: IllegalArgumentException) {
+                rejected++
+            }
+        }
+
+        assertEquals(2, rejected)
+        assertEquals(0, server.requestCount)
     }
 
     @Test

@@ -90,8 +90,10 @@ class TeddyCloudClient private constructor(
         return parseCommand(api.playback(overlay, body.toRequestBody(JSON_MEDIA)))
     }
 
-    suspend fun setVolume(overlay: String, level: Int): CommandResponse =
-        parseCommand(api.volume(overlay, """{"level":${BoxVolume.clamp(level)}}""".toRequestBody(JSON_MEDIA)))
+    suspend fun setVolume(overlay: String, level: Int): CommandResponse {
+        require(BoxVolume.isValid(level)) { "TB2 volume must be between ${BoxVolume.MIN_LEVEL} and ${BoxVolume.MAX_LEVEL}" }
+        return parseCommand(api.volume(overlay, """{"level":$level}""".toRequestBody(JSON_MEDIA)))
+    }
 
     suspend fun ping(overlay: String): CommandResponse = parseCommand(api.ping(overlay))
 

@@ -4,26 +4,24 @@ import de.teddycloud.teddyremote.model.BoxVolume
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Serializes absolute volume commands per box while retaining only the latest desired value.
- * Confirmed device values are kept separate from the value shown during a pending user change.
+ * Coalesces absolute volume changes per box and keeps optimistic UI state separate
+ * from the latest confirmed device value.
  */
 internal class VolumeCommandCoordinator(
     private val scope: CoroutineScope,
     private val send: suspend (boxId: String, level: Int) -> Unit,
     private val refreshConfirmed: suspend (boxId: String) -> Int?,
     private val onDesiredChanged: suspend (boxId: String, level: Int) -> Unit,
+    private val onOptimisticExpired: suspend (boxId: String) -> Unit,
     private val onSettled: suspend (boxId: String, error: String?) -> Unit,
     private val debounceMillis: Long = DEFAULT_DEBOUNCE_MILLIS,
+    private val optimisticLockoutMillis: Long = DEFAULT_OPTIMISTIC_LOCKOUT_MILLIS,
     private val confirmationTimeoutMillis: Long = DEFAULT_CONFIRMATION_TIMEOUT_MILLIS,
 ) {
     private val mutex = Mutex()
@@ -33,110 +31,122 @@ internal class VolumeCommandCoordinator(
         val normalizedId = boxId.uppercase()
         val boundedLevel = BoxVolume.clamp(level)
         mutex.withLock {
-            val existing = states[normalizedId]
-            if (existing == null) {
-                val state = PendingVolume(desired = boundedLevel)
-                states[normalizedId] = state
-                state.job = scope.launch { runSender(normalizedId, state) }
-            } else if (existing.desired != boundedLevel) {
-                existing.desired = boundedLevel
-                existing.changed.trySend(Unit)
-            }
+            val state = states.getOrPut(normalizedId) { PendingVolume(desired = boundedLevel) }
+            if (state.revision > 0 && state.desired == boundedLevel) return
+
+            state.revision++
+            state.desired = boundedLevel
+            state.inFlight = null
+            state.confirmed = false
+            state.optimisticVisible = true
+            state.senderJob?.cancel()
+            state.lockoutJob?.cancel()
+
+            val revision = state.revision
+            state.senderJob = scope.launch { runSender(normalizedId, state, revision) }
+            state.lockoutJob = scope.launch { expireOptimisticValue(normalizedId, state, revision) }
+            onDesiredChanged(normalizedId, boundedLevel)
         }
-        onDesiredChanged(normalizedId, boundedLevel)
     }
 
     suspend fun confirm(boxId: String, level: Int) {
+        if (!BoxVolume.isValid(level)) return
         val normalizedId = boxId.uppercase()
-        val completed = mutex.withLock {
+        mutex.withLock {
             val state = states[normalizedId] ?: return
-            if (state.desired != BoxVolume.clamp(level)) return
-            states.remove(normalizedId)
-            state.changed.close()
-            state.job
+            if (state.inFlight != level || state.desired != level) return
+
+            state.confirmed = true
+            state.senderJob?.cancel()
+            if (!state.optimisticVisible) {
+                states.remove(normalizedId)
+                state.lockoutJob?.cancel()
+                onSettled(normalizedId, null)
+            }
         }
-        completed?.cancel()
-        onSettled(normalizedId, null)
     }
 
     suspend fun cancelAll() {
-        val cancelled = mutex.withLock {
+        mutex.withLock {
             val entries = states.toList()
             states.clear()
-            entries
+            entries.forEach { (_, state) ->
+                state.senderJob?.cancel()
+                state.lockoutJob?.cancel()
+            }
+            entries.forEach { (boxId, _) -> onSettled(boxId, null) }
         }
-        cancelled.forEach { (_, state) ->
-            state.changed.close()
-            state.job?.cancel()
-        }
-        cancelled.forEach { (boxId, _) -> onSettled(boxId, null) }
     }
 
-    private suspend fun runSender(boxId: String, state: PendingVolume) {
+    private suspend fun runSender(boxId: String, state: PendingVolume, revision: Long) {
         try {
-            while (currentCoroutineContext().isActive) {
-                delay(debounceMillis)
-                while (state.changed.tryReceive().isSuccess) Unit
-                val target = mutex.withLock {
-                    if (states[boxId] !== state) return
-                    state.desired.also { state.inFlight = it }
-                }
-                send(boxId, target)
+            delay(debounceMillis)
+            val target = mutex.withLock {
+                if (states[boxId] !== state || state.revision != revision) return
+                state.desired.also { state.inFlight = it }
+            }
+            send(boxId, target)
+            delay(confirmationTimeoutMillis)
 
-                val superseded = mutex.withLock {
-                    states[boxId] !== state || state.desired != target
-                }
-                if (superseded) continue
-
-                val changed = withTimeoutOrNull(confirmationTimeoutMillis) {
-                    state.changed.receive()
-                    true
-                } ?: false
-                if (changed) continue
-
-                val confirmed = refreshConfirmed(boxId)
-                val result = mutex.withLock {
-                    if (states[boxId] !== state) return
-                    if (state.desired != target) return@withLock SettleResult.CONTINUE
+            val confirmed = refreshConfirmed(boxId)
+            mutex.withLock {
+                if (states[boxId] !== state || state.revision != revision) return
+                if (confirmed == target) {
+                    state.confirmed = true
+                    if (!state.optimisticVisible) {
+                        states.remove(boxId)
+                        state.lockoutJob?.cancel()
+                        onSettled(boxId, null)
+                    }
+                } else {
                     states.remove(boxId)
-                    state.changed.close()
-                    if (confirmed == target) SettleResult.SUCCESS else SettleResult.UNCONFIRMED
+                    state.lockoutJob?.cancel()
+                    onSettled(boxId, "Lautstärke konnte nicht bestätigt werden")
                 }
-                when (result) {
-                    SettleResult.CONTINUE -> continue
-                    SettleResult.SUCCESS -> onSettled(boxId, null)
-                    SettleResult.UNCONFIRMED -> onSettled(boxId, "Lautstärke konnte nicht bestätigt werden")
-                }
-                return
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
             runCatching { refreshConfirmed(boxId) }
-            val removed = mutex.withLock {
-                if (states[boxId] !== state) false else {
-                    states.remove(boxId)
-                    state.changed.close()
-                    true
-                }
+            mutex.withLock {
+                if (states[boxId] !== state || state.revision != revision) return
+                states.remove(boxId)
+                state.lockoutJob?.cancel()
+                onSettled(
+                    boxId,
+                    error.message?.takeIf(String::isNotBlank) ?: "Lautstärke konnte nicht gesetzt werden",
+                )
             }
-            if (removed) {
-                onSettled(boxId, error.message?.takeIf(String::isNotBlank) ?: "Lautstärke konnte nicht gesetzt werden")
+        }
+    }
+
+    private suspend fun expireOptimisticValue(boxId: String, state: PendingVolume, revision: Long) {
+        delay(optimisticLockoutMillis)
+        mutex.withLock {
+            if (states[boxId] !== state || state.revision != revision) return
+            state.optimisticVisible = false
+            onOptimisticExpired(boxId)
+            if (state.confirmed) {
+                states.remove(boxId)
+                state.senderJob?.cancel()
+                onSettled(boxId, null)
             }
         }
     }
 
     private data class PendingVolume(
         var desired: Int,
+        var revision: Long = 0,
         var inFlight: Int? = null,
-        val changed: Channel<Unit> = Channel(Channel.CONFLATED),
-        var job: Job? = null,
+        var confirmed: Boolean = false,
+        var optimisticVisible: Boolean = true,
+        var senderJob: Job? = null,
+        var lockoutJob: Job? = null,
     )
 
-    private enum class SettleResult { CONTINUE, SUCCESS, UNCONFIRMED }
-
     private companion object {
-        const val DEFAULT_DEBOUNCE_MILLIS = 100L
+        const val DEFAULT_DEBOUNCE_MILLIS = 250L
+        const val DEFAULT_OPTIMISTIC_LOCKOUT_MILLIS = 700L
         const val DEFAULT_CONFIRMATION_TIMEOUT_MILLIS = 2_000L
     }
 }

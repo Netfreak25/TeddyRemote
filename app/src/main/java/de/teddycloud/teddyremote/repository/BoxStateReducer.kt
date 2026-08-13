@@ -13,7 +13,10 @@ object BoxStateReducer {
         "PlaybackChapter" -> runtime.copy(playback = runtime.playback.copy(valid = true, chapter = raw.toIntOrNull(), updatedAt = timestampSeconds))
         "PlaybackChapterUntilMs" -> runtime.copy(playback = runtime.playback.copy(valid = true, chapterUntilMs = raw.toLongOrNull(), updatedAt = timestampSeconds))
         "PlaybackChapterDuration" -> runtime.copy(playback = runtime.playback.copy(valid = true, chapterDuration = raw.ifBlank { null }, updatedAt = timestampSeconds))
-        "VolumeLevel" -> runtime.copy(volume = VolumeRuntime(true, timestampSeconds, raw.toIntOrNull()?.let(BoxVolume::clamp)))
+        "VolumeLevel" -> raw.toIntOrNull()
+            ?.takeIf(BoxVolume::isValid)
+            ?.let { runtime.copy(volume = VolumeRuntime(true, timestampSeconds, it)) }
+            ?: runtime
         "BatteryPercent" -> runtime.copy(battery = runtime.battery.copy(valid = true, updatedAt = timestampSeconds, percent = raw.toIntOrNull()?.coerceIn(0, 100)))
         "BatteryStatus" -> runtime.copy(battery = runtime.battery.copy(valid = true, updatedAt = timestampSeconds, status = raw.ifBlank { null }))
         "SpeakerOutput" -> runtime.copy(headphones = runtime.headphones.copy(valid = true, updatedAt = timestampSeconds, speakerOutput = raw.toBooleanStrictOrNull()))

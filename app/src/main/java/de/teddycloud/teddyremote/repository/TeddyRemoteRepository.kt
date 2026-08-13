@@ -6,6 +6,7 @@ import de.teddycloud.teddyremote.model.BatteryRuntime
 import de.teddycloud.teddyremote.model.BedtimeRuntime
 import de.teddycloud.teddyremote.model.BoxRuntime
 import de.teddycloud.teddyremote.model.BoxUiModel
+import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.model.CertificateCandidate
 import de.teddycloud.teddyremote.model.CertificateTarget
 import de.teddycloud.teddyremote.model.CommandResponse
@@ -85,6 +86,9 @@ class TeddyRemoteRepository(
         },
         onDesiredChanged = { boxId, level ->
             updateBox(boxId) { it.copy(desiredVolume = level, commandError = null) }
+        },
+        onOptimisticExpired = { boxId ->
+            updateBox(boxId) { it.copy(desiredVolume = null) }
         },
         onSettled = { boxId, error ->
             updateBox(boxId) { it.copy(desiredVolume = null, commandError = error) }
@@ -555,7 +559,9 @@ class TeddyRemoteRepository(
                 old.runtime.playback.contentVersion != runtime.playback.contentVersion
             forceMetadataRefresh = valueEvent.field == "PlaybackChapter" &&
                 model.metadata?.playlist.isNullOrEmpty()
-            if (valueEvent.field == "VolumeLevel") confirmedVolume = runtime.volume.level
+            if (valueEvent.field == "VolumeLevel") {
+                confirmedVolume = valueEvent.value.toIntOrNull()?.takeIf(BoxVolume::isValid)
+            }
             model.copy(box = old.copy(runtime = runtime), commandError = null)
         }
         confirmedVolume?.let { volumeCommands.confirm(valueEvent.boxId, it) }
