@@ -31,20 +31,36 @@ class TeddyRemoteService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var mediaSessions: BoxMediaSessionManager
     private lateinit var repository: TeddyRemoteRepository
+    private lateinit var currentConnectionStatus: ConnectionStatus
+    private var onlineBoxCount = 0
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         repository = (application as TeddyRemoteApplication).container.repository
         mediaSessions = BoxMediaSessionManager(this, repository, scope)
-        startForeground(CONNECTION_NOTIFICATION_ID, connectionNotification(repository.connection.value))
+        currentConnectionStatus = repository.connection.value
+        onlineBoxCount = repository.boxes.value.count { it.box.runtime.online }
+        startForeground(
+            CONNECTION_NOTIFICATION_ID,
+            connectionNotification(currentConnectionStatus, onlineBoxCount),
+        )
         scope.launch {
-            repository.boxes.collectLatest(mediaSessions::update)
+            repository.boxes.collectLatest { boxes ->
+                mediaSessions.update(boxes)
+                val newOnlineBoxCount = boxes.count { it.box.runtime.online }
+                if (newOnlineBoxCount != onlineBoxCount) {
+                    onlineBoxCount = newOnlineBoxCount
+                    updateConnectionNotification()
+                }
+            }
         }
         scope.launch {
             repository.connection.collectLatest { status ->
-                getSystemService(NotificationManager::class.java)
-                    .notify(CONNECTION_NOTIFICATION_ID, connectionNotification(status))
+                if (status != currentConnectionStatus) {
+                    currentConnectionStatus = status
+                    updateConnectionNotification()
+                }
             }
         }
     }
@@ -73,7 +89,14 @@ class TeddyRemoteService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun connectionNotification(status: ConnectionStatus): Notification {
+    private fun updateConnectionNotification() {
+        getSystemService(NotificationManager::class.java).notify(
+            CONNECTION_NOTIFICATION_ID,
+            connectionNotification(currentConnectionStatus, onlineBoxCount),
+        )
+    }
+
+    private fun connectionNotification(status: ConnectionStatus, onlineBoxes: Int): Notification {
         val openApp = PendingIntent.getActivity(
             this,
             0,
@@ -94,6 +117,9 @@ class TeddyRemoteService : Service() {
         val detail = when {
             paused -> status.wifiGate.userMessage
             status.message != null -> status.message
+            status.isApiUsable && onlineBoxes == 0 -> getString(R.string.service_no_boxes_online)
+            status.isApiUsable && onlineBoxes == 1 -> getString(R.string.service_one_box_online)
+            status.isApiUsable -> getString(R.string.service_boxes_online, onlineBoxes)
             else -> getString(R.string.service_waiting)
         }
         return Notification.Builder(this, CHANNEL_ID)

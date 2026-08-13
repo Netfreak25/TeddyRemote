@@ -8,6 +8,9 @@
     <string name="service_interrupted">TeddyCloud-Verbindung unterbrochen</string>
     <string name="service_paused">TeddyRemote pausiert</string>
     <string name="service_waiting">TeddyRemote wartet auf Boxen</string>
+    <string name="service_no_boxes_online">Keine Box online</string>
+    <string name="service_one_box_online">1 Box online</string>
+    <string name="service_boxes_online">%1$d Boxen online</string>
     <string name="service_action_reconnect">Neu verbinden</string>
     <string name="service_action_stop">Beenden</string>
     <string name="media_previous">Vorheriger Titel</string>
