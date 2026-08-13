@@ -1,6 +1,8 @@
 package de.teddycloud.teddyremote.repository
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -28,78 +30,161 @@ class VolumeCommandCoordinatorTest {
         advanceTimeBy(1)
         runCurrent()
         assertEquals(listOf(4), sent)
+        coordinator.cancelAll()
     }
 
     @Test
-    fun `matching confirmation keeps optimistic value until lockout expires`() = runTest {
-        val expired = mutableListOf<String>()
+    fun `change during request waits and sends only the latest target next`() = runTest {
+        val firstRequestStarted = CompletableDeferred<Unit>()
+        val releaseFirstRequest = CompletableDeferred<Unit>()
+        val sent = mutableListOf<Int>()
+        var activeRequests = 0
+        var maximumActiveRequests = 0
+        val coordinator = coordinator(
+            send = { target ->
+                activeRequests++
+                maximumActiveRequests = maxOf(maximumActiveRequests, activeRequests)
+                sent += target
+                try {
+                    if (sent.size == 1) {
+                        firstRequestStarted.complete(Unit)
+                        releaseFirstRequest.await()
+                    }
+                } finally {
+                    activeRequests--
+                }
+            },
+        )
+
+        coordinator.submit(BOX_ID, 3)
+        advanceTimeBy(DEBOUNCE_MILLIS)
+        runCurrent()
+        firstRequestStarted.await()
+
+        coordinator.submit(BOX_ID, 4)
+        coordinator.submit(BOX_ID, 7)
+        advanceTimeBy(DEBOUNCE_MILLIS)
+        runCurrent()
+        assertEquals(listOf(3), sent)
+
+        releaseFirstRequest.complete(Unit)
+        runCurrent()
+
+        assertEquals(listOf(3, 7), sent)
+        assertEquals(1, maximumActiveRequests)
+        coordinator.cancelAll()
+    }
+
+    @Test
+    fun `stale confirmations never replace or settle the latest target`() = runTest {
+        val desired = mutableListOf<Int>()
         val settled = mutableListOf<String?>()
         val coordinator = coordinator(
             send = {},
-            onOptimisticExpired = { expired += it },
+            onDesired = { desired += it },
             onSettled = { settled += it },
         )
 
-        coordinator.submit(BOX_ID, 4)
+        coordinator.submit(BOX_ID, 12)
         advanceTimeBy(DEBOUNCE_MILLIS)
         runCurrent()
-        coordinator.confirm(BOX_ID, 4)
-        advanceTimeBy(LOCKOUT_MILLIS - DEBOUNCE_MILLIS - 1)
+        (2..11).forEach { coordinator.confirm(BOX_ID, it) }
+        advanceTimeBy(CONFIRMATION_TIMEOUT_MILLIS / 2)
         runCurrent()
 
-        assertTrue(expired.isEmpty())
+        assertEquals(listOf(12), desired)
         assertTrue(settled.isEmpty())
 
-        advanceTimeBy(1)
-        runCurrent()
-        assertEquals(listOf(BOX_ID), expired)
+        coordinator.confirm(BOX_ID, 12)
         assertEquals(listOf<String?>(null), settled)
     }
 
     @Test
-    fun `stale confirmation does not settle and lockout reveals confirmed state`() = runTest {
-        val expired = mutableListOf<String>()
+    fun `confirmation can settle while the HTTP request is still returning`() = runTest {
+        val requestStarted = CompletableDeferred<Unit>()
+        val releaseRequest = CompletableDeferred<Unit>()
         val settled = mutableListOf<String?>()
         val coordinator = coordinator(
-            send = {},
-            onOptimisticExpired = { expired += it },
+            send = {
+                requestStarted.complete(Unit)
+                releaseRequest.await()
+            },
             onSettled = { settled += it },
         )
 
-        coordinator.submit(BOX_ID, 4)
+        coordinator.submit(BOX_ID, 6)
         advanceTimeBy(DEBOUNCE_MILLIS)
         runCurrent()
-        coordinator.confirm(BOX_ID, 2)
-        advanceTimeBy(LOCKOUT_MILLIS - DEBOUNCE_MILLIS)
-        runCurrent()
+        requestStarted.await()
+        coordinator.confirm(BOX_ID, 6)
 
-        assertEquals(listOf(BOX_ID), expired)
-        assertTrue(settled.isEmpty())
+        assertEquals(listOf<String?>(null), settled)
+
+        releaseRequest.complete(Unit)
+        runCurrent()
+        advanceTimeBy(CONFIRMATION_TIMEOUT_MILLIS)
+        runCurrent()
+        assertEquals(listOf<String?>(null), settled)
     }
 
     @Test
-    fun `new local change restarts debounce and lockout`() = runTest {
-        val sent = mutableListOf<Int>()
-        val expired = mutableListOf<String>()
+    fun `confirmation timeout starts after the request completes`() = runTest {
+        var refreshes = 0
+        val settled = mutableListOf<String?>()
         val coordinator = coordinator(
-            send = { sent += it },
-            onOptimisticExpired = { expired += it },
+            send = { delay(REQUEST_DURATION_MILLIS) },
+            refresh = {
+                refreshes++
+                5
+            },
+            onSettled = { settled += it },
+        )
+
+        coordinator.submit(BOX_ID, 5)
+        advanceTimeBy(DEBOUNCE_MILLIS + REQUEST_DURATION_MILLIS + CONFIRMATION_TIMEOUT_MILLIS - 1)
+        runCurrent()
+
+        assertEquals(0, refreshes)
+        assertTrue(settled.isEmpty())
+
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(1, refreshes)
+        assertEquals(listOf<String?>(null), settled)
+    }
+
+    @Test
+    fun `failure of an obsolete request does not discard a newer target`() = runTest {
+        val firstRequestStarted = CompletableDeferred<Unit>()
+        val failFirstRequest = CompletableDeferred<Unit>()
+        val sent = mutableListOf<Int>()
+        val settled = mutableListOf<String?>()
+        val coordinator = coordinator(
+            send = { target ->
+                sent += target
+                if (sent.size == 1) {
+                    firstRequestStarted.complete(Unit)
+                    failFirstRequest.await()
+                    error("old request failed")
+                }
+            },
+            onSettled = { settled += it },
         )
 
         coordinator.submit(BOX_ID, 3)
-        advanceTimeBy(LOCKOUT_MILLIS - 1)
-        coordinator.submit(BOX_ID, 5)
-        runCurrent()
-
-        assertTrue(expired.isEmpty())
-
         advanceTimeBy(DEBOUNCE_MILLIS)
         runCurrent()
-        assertEquals(listOf(3, 5), sent)
-
-        advanceTimeBy(LOCKOUT_MILLIS - DEBOUNCE_MILLIS)
+        firstRequestStarted.await()
+        coordinator.submit(BOX_ID, 8)
+        advanceTimeBy(DEBOUNCE_MILLIS)
+        failFirstRequest.complete(Unit)
         runCurrent()
-        assertEquals(listOf(BOX_ID), expired)
+
+        assertEquals(listOf(3, 8), sent)
+        assertTrue(settled.isEmpty())
+
+        coordinator.confirm(BOX_ID, 8)
+        assertEquals(listOf<String?>(null), settled)
     }
 
     @Test
@@ -125,7 +210,7 @@ class VolumeCommandCoordinatorTest {
     }
 
     @Test
-    fun `duplicate target does not restart timers or send twice`() = runTest {
+    fun `duplicate pending target does not restart timers or send twice`() = runTest {
         val sent = mutableListOf<Int>()
         val coordinator = coordinator(send = { sent += it })
 
@@ -136,30 +221,29 @@ class VolumeCommandCoordinatorTest {
         runCurrent()
 
         assertEquals(listOf(12), sent)
+        coordinator.cancelAll()
     }
 
     private fun kotlinx.coroutines.test.TestScope.coordinator(
         send: suspend (Int) -> Unit,
         refresh: suspend () -> Int? = { null },
         onDesired: suspend (Int) -> Unit = {},
-        onOptimisticExpired: suspend (String) -> Unit = {},
         onSettled: suspend (String?) -> Unit = {},
     ) = VolumeCommandCoordinator(
         scope = this,
         send = { _, level -> send(level) },
         refreshConfirmed = { refresh() },
         onDesiredChanged = { _, level -> onDesired(level) },
-        onOptimisticExpired = onOptimisticExpired,
         onSettled = { _, error -> onSettled(error) },
         debounceMillis = DEBOUNCE_MILLIS,
-        optimisticLockoutMillis = LOCKOUT_MILLIS,
         confirmationTimeoutMillis = CONFIRMATION_TIMEOUT_MILLIS,
+        nowMillis = { testScheduler.currentTime },
     )
 
     private companion object {
         const val BOX_ID = "D4594404DEAC"
         const val DEBOUNCE_MILLIS = 100L
-        const val LOCKOUT_MILLIS = 300L
         const val CONFIRMATION_TIMEOUT_MILLIS = 500L
+        const val REQUEST_DURATION_MILLIS = 300L
     }
 }

@@ -58,6 +58,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -207,7 +208,15 @@ private fun TonieboxCard(
     val runtime = model.box.runtime
     val confirmedVolume = model.desiredVolume ?: runtime.volume.level ?: BoxVolume.MIN_LEVEL
     var draggedVolume by remember(model.box.id) { mutableStateOf<Float?>(null) }
+    var submittedVolume by remember(model.box.id) { mutableStateOf<Int?>(null) }
     val volume = draggedVolume ?: confirmedVolume.toFloat()
+    LaunchedEffect(confirmedVolume, submittedVolume) {
+        val submitted = submittedVolume ?: return@LaunchedEffect
+        if (confirmedVolume == submitted) {
+            draggedVolume = null
+            submittedVolume = null
+        }
+    }
     var brightness by remember(model.box.id, model.ringBrightness) {
         mutableFloatStateOf((model.ringBrightness ?: 100).toFloat())
     }
@@ -366,10 +375,14 @@ private fun TonieboxCard(
                 Icon(Icons.AutoMirrored.Rounded.VolumeUp, null)
                 Slider(
                     value = volume,
-                    onValueChange = { draggedVolume = it },
+                    onValueChange = {
+                        submittedVolume = null
+                        draggedVolume = it
+                    },
                     onValueChangeFinished = {
                         val requestedVolume = BoxVolume.clamp(volume.roundToInt())
-                        draggedVolume = null
+                        draggedVolume = requestedVolume.toFloat()
+                        submittedVolume = requestedVolume
                         onVolume(requestedVolume)
                     },
                     enabled = runtime.controls.volume && model.pendingCommand == null,

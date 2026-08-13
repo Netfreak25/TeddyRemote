@@ -169,7 +169,12 @@ class BoxMediaSessionManager(
                 )
             },
         )
-        val volume = (model.desiredVolume ?: model.box.runtime.volume.level)
+        session.localVolume?.let { localVolume ->
+            if (model.desiredVolume != null || model.box.runtime.volume.level == localVolume) {
+                session.localVolume = null
+            }
+        }
+        val volume = (session.localVolume ?: model.desiredVolume ?: model.box.runtime.volume.level)
             ?.let(BoxVolume::clamp)
             ?: BoxVolume.MIN_LEVEL
         if (volume != session.volumeProvider.currentVolume) session.volumeProvider.setCurrentVolume(volume)
@@ -262,6 +267,7 @@ class BoxMediaSessionManager(
     private fun setVolume(session: BoxSession, value: Int) {
         val bounded = BoxVolume.clamp(value)
         if (bounded == session.volumeProvider.currentVolume) return
+        session.localVolume = bounded
         session.volumeProvider.setCurrentVolume(bounded)
         scope.launch { repository.setVolume(session.model.box.id, bounded) }
     }
@@ -331,6 +337,7 @@ class BoxMediaSessionManager(
         val notificationId: Int,
         var artworkUrl: String? = null,
         var artwork: Bitmap? = null,
+        var localVolume: Int? = null,
     )
 
     private companion object {

@@ -93,9 +93,6 @@ class TeddyRemoteRepository(
         onDesiredChanged = { boxId, level ->
             updateBox(boxId) { it.copy(desiredVolume = level, commandError = null) }
         },
-        onOptimisticExpired = { boxId ->
-            updateBox(boxId) { it.copy(desiredVolume = null) }
-        },
         onSettled = { boxId, error ->
             updateBox(boxId) { it.copy(desiredVolume = null, commandError = error) }
         },
@@ -245,7 +242,12 @@ class TeddyRemoteRepository(
     }
 
     suspend fun setVolume(boxId: String, level: Int) {
-        volumeCommands.submit(boxId, level)
+        val boundedLevel = BoxVolume.clamp(level)
+        val currentLevel = _boxes.value
+            .firstOrNull { it.box.id.equals(boxId, ignoreCase = true) }
+            ?.let { it.desiredVolume ?: it.box.runtime.volume.level }
+        if (currentLevel == boundedLevel) return
+        volumeCommands.submit(boxId, boundedLevel)
     }
 
     suspend fun ping(boxId: String) {
