@@ -51,13 +51,18 @@ class TeddyCloudClientTest {
     @Test
     fun `sends bounded volume command`() = runTest {
         server.enqueue(MockResponse().setBody("""{"ok":true,"message":"queued"}"""))
+        server.enqueue(MockResponse().setBody("""{"ok":true,"message":"queued"}"""))
 
-        val response = client.setVolume("D4594404DEAC", 99)
-        val request = server.takeRequest()
+        val maximumResponse = client.setVolume("D4594404DEAC", 99)
+        val maximumRequest = server.takeRequest()
+        val minimumResponse = client.setVolume("D4594404DEAC", 0)
+        val minimumRequest = server.takeRequest()
 
-        assertTrue(response.ok)
-        assertEquals("/api/box/volume?overlay=D4594404DEAC", request.path)
-        assertEquals("{\"level\":10}", request.body.readUtf8())
+        assertTrue(maximumResponse.ok)
+        assertTrue(minimumResponse.ok)
+        assertEquals("/api/box/volume?overlay=D4594404DEAC", maximumRequest.path)
+        assertEquals("{\"level\":11}", maximumRequest.body.readUtf8())
+        assertEquals("{\"level\":1}", minimumRequest.body.readUtf8())
     }
 
     @Test

@@ -11,10 +11,12 @@ class BoxStateReducerTest {
         val playing = BoxStateReducer.reduce(BoxRuntime(), "PlaybackStatus", "playing", 100)
         val withRuid = BoxStateReducer.reduce(playing, "PlaybackRuid", "28F28F11500304E0", 101)
         val withVolume = BoxStateReducer.reduce(withRuid, "VolumeLevel", "17", 102)
+        val withMinimumVolume = BoxStateReducer.reduce(withVolume, "VolumeLevel", "0", 103)
 
         assertTrue(withVolume.playback.isPlaying)
         assertEquals("28F28F11500304E0", withVolume.playback.ruid)
-        assertEquals(10, withVolume.volume.level)
+        assertEquals(11, withVolume.volume.level)
+        assertEquals(1, withMinimumVolume.volume.level)
     }
 
     @Test

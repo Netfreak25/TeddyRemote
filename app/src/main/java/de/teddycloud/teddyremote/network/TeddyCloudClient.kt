@@ -1,6 +1,7 @@
 package de.teddycloud.teddyremote.network
 
 import de.teddycloud.teddyremote.model.BoxesResponse
+import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.model.CommandResponse
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.MqttSettingsImport
@@ -90,7 +91,7 @@ class TeddyCloudClient private constructor(
     }
 
     suspend fun setVolume(overlay: String, level: Int): CommandResponse =
-        parseCommand(api.volume(overlay, """{"level":${level.coerceIn(0, 10)}}""".toRequestBody(JSON_MEDIA)))
+        parseCommand(api.volume(overlay, """{"level":${BoxVolume.clamp(level)}}""".toRequestBody(JSON_MEDIA)))
 
     suspend fun ping(overlay: String): CommandResponse = parseCommand(api.ping(overlay))
 

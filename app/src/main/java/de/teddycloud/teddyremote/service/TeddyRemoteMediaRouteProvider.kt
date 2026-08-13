@@ -10,6 +10,7 @@ import androidx.mediarouter.media.MediaRouteProviderDescriptor
 import androidx.mediarouter.media.MediaRouter
 import de.teddycloud.teddyremote.R
 import de.teddycloud.teddyremote.model.BoxUiModel
+import de.teddycloud.teddyremote.model.BoxVolume
 
 /** Publishes every controllable TB2 as a named remote Android media route. */
 internal class TeddyRemoteMediaRouteProvider(
@@ -26,8 +27,8 @@ internal class TeddyRemoteMediaRouteProvider(
                 name = model.box.boxName.ifBlank { model.box.commonName.ifBlank { boxId } },
                 description = routeContext.getString(R.string.media_route_description),
                 volume = (model.desiredVolume ?: model.box.runtime.volume.level)
-                    ?.coerceIn(MIN_BOX_VOLUME, MAX_BOX_VOLUME)
-                    ?: MIN_BOX_VOLUME,
+                    ?.let(BoxVolume::clamp)
+                    ?: BoxVolume.MIN_LEVEL,
             )
         }
         descriptor = MediaRouteProviderDescriptor.Builder().apply {
@@ -40,7 +41,7 @@ internal class TeddyRemoteMediaRouteProvider(
         return object : RouteController() {
             override fun onSetVolume(volume: Int) {
                 routes[routeId]?.let { route ->
-                    onVolumeChanged(route.boxId, volume.coerceIn(MIN_BOX_VOLUME, MAX_BOX_VOLUME))
+                    onVolumeChanged(route.boxId, BoxVolume.clamp(volume))
                 }
             }
 
@@ -48,7 +49,7 @@ internal class TeddyRemoteMediaRouteProvider(
                 routes[routeId]?.let { route ->
                     onVolumeChanged(
                         route.boxId,
-                        (route.volume + delta).coerceIn(MIN_BOX_VOLUME, MAX_BOX_VOLUME),
+                        BoxVolume.clamp(route.volume + delta),
                     )
                 }
             }
@@ -64,7 +65,7 @@ internal class TeddyRemoteMediaRouteProvider(
             .setPlaybackType(MediaRouter.RouteInfo.PLAYBACK_TYPE_REMOTE)
             .setPlaybackStream(AudioManager.STREAM_MUSIC)
             .setVolumeHandling(MediaRouter.RouteInfo.PLAYBACK_VOLUME_VARIABLE)
-            .setVolumeMax(MAX_BOX_VOLUME)
+            .setVolumeMax(BoxVolume.MAX_LEVEL)
             .setVolume(volume)
             .addControlFilter(LIVE_AUDIO_FILTER)
             .build()
@@ -78,8 +79,6 @@ internal class TeddyRemoteMediaRouteProvider(
 
     private companion object {
         const val ROUTE_ID_PREFIX = "teddyremote:"
-        const val MIN_BOX_VOLUME = 0
-        const val MAX_BOX_VOLUME = 10
         val LIVE_AUDIO_FILTER = IntentFilter().apply {
             addCategory(MediaControlIntent.CATEGORY_LIVE_AUDIO)
         }

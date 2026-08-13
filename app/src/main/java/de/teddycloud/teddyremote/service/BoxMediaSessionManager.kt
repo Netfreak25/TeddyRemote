@@ -19,6 +19,7 @@ import coil.request.ImageRequest
 import de.teddycloud.teddyremote.MainActivity
 import de.teddycloud.teddyremote.R
 import de.teddycloud.teddyremote.model.BoxUiModel
+import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.repository.TeddyRemoteRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -114,8 +115,8 @@ class BoxMediaSessionManager(
         }
         val volumeProvider = object : VolumeProvider(
             VOLUME_CONTROL_ABSOLUTE,
-            MAX_BOX_VOLUME,
-            model.box.runtime.volume.level?.coerceIn(0, MAX_BOX_VOLUME) ?: 0,
+            BoxVolume.MAX_LEVEL,
+            model.box.runtime.volume.level?.let(BoxVolume::clamp) ?: BoxVolume.MIN_LEVEL,
         ) {
             override fun onSetVolumeTo(volume: Int) = setVolume(holder, volume)
             override fun onAdjustVolume(direction: Int) = setVolume(holder, currentVolume + direction)
@@ -181,8 +182,8 @@ class BoxMediaSessionManager(
             },
         )
         val volume = (model.desiredVolume ?: model.box.runtime.volume.level)
-            ?.coerceIn(0, MAX_BOX_VOLUME)
-            ?: 0
+            ?.let(BoxVolume::clamp)
+            ?: BoxVolume.MIN_LEVEL
         if (volume != session.volumeProvider.currentVolume) session.volumeProvider.setCurrentVolume(volume)
         session.mediaSession.isActive = true
     }
@@ -271,7 +272,7 @@ class BoxMediaSessionManager(
     }
 
     private fun setVolume(session: BoxSession, value: Int) {
-        val bounded = value.coerceIn(0, MAX_BOX_VOLUME)
+        val bounded = BoxVolume.clamp(value)
         session.volumeProvider.setCurrentVolume(bounded)
         scope.launch { repository.setVolume(session.model.box.id, bounded) }
     }
@@ -380,7 +381,6 @@ class BoxMediaSessionManager(
     )
 
     private companion object {
-        const val MAX_BOX_VOLUME = 10
         const val MEDIA_ROUTE_PREFIX = "teddyremote:"
         const val BEDTIME_MEDIA_REFRESH_MS = 30_000L
     }

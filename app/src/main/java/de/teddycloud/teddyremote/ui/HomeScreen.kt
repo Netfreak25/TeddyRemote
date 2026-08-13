@@ -79,6 +79,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import coil.compose.AsyncImage
 import de.teddycloud.teddyremote.model.BoxUiModel
+import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.model.BedtimeRuntime
 import de.teddycloud.teddyremote.model.LinkStatus
 import java.time.Instant
@@ -196,7 +197,7 @@ private fun TonieboxCard(
     var bedtimeDialogVisible by remember(model.box.id) { mutableStateOf(false) }
     var sleepDialogVisible by remember(model.box.id) { mutableStateOf(false) }
     val runtime = model.box.runtime
-    val confirmedVolume = model.desiredVolume ?: runtime.volume.level ?: 0
+    val confirmedVolume = model.desiredVolume ?: runtime.volume.level ?: BoxVolume.MIN_LEVEL
     var draggedVolume by remember(model.box.id) { mutableStateOf<Float?>(null) }
     val volume = draggedVolume ?: confirmedVolume.toFloat()
     var brightness by remember(model.box.id, model.ringBrightness) {
@@ -359,13 +360,13 @@ private fun TonieboxCard(
                     value = volume,
                     onValueChange = { draggedVolume = it },
                     onValueChangeFinished = {
-                        val requestedVolume = volume.roundToInt().coerceIn(MIN_VOLUME, MAX_VOLUME)
+                        val requestedVolume = BoxVolume.clamp(volume.roundToInt())
                         draggedVolume = null
                         onVolume(requestedVolume)
                     },
                     enabled = runtime.controls.volume && model.pendingCommand == null,
-                    valueRange = 0f..10f,
-                    steps = 9,
+                    valueRange = BoxVolume.MIN_LEVEL.toFloat()..BoxVolume.MAX_LEVEL.toFloat(),
+                    steps = BoxVolume.SLIDER_STEPS,
                     modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
                 )
                 Text(volume.roundToInt().toString(), style = MaterialTheme.typography.labelLarge)
@@ -777,8 +778,6 @@ private fun currentTrackTitle(model: BoxUiModel): String {
 }
 
 private val RUID_PATTERN = Regex("^[0-9A-Fa-f]{16}$")
-private const val MIN_VOLUME = 0
-private const val MAX_VOLUME = 10
 
 private fun relativeLastSeen(epochSeconds: Long): String {
     if (epochSeconds <= 0) return "unbekannt"

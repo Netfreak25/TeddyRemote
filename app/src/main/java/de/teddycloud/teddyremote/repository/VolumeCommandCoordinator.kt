@@ -1,5 +1,6 @@
 package de.teddycloud.teddyremote.repository
 
+import de.teddycloud.teddyremote.model.BoxVolume
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -30,7 +31,7 @@ internal class VolumeCommandCoordinator(
 
     suspend fun submit(boxId: String, level: Int) {
         val normalizedId = boxId.uppercase()
-        val boundedLevel = level.coerceIn(MIN_VOLUME, MAX_VOLUME)
+        val boundedLevel = BoxVolume.clamp(level)
         mutex.withLock {
             val existing = states[normalizedId]
             if (existing == null) {
@@ -49,7 +50,7 @@ internal class VolumeCommandCoordinator(
         val normalizedId = boxId.uppercase()
         val completed = mutex.withLock {
             val state = states[normalizedId] ?: return
-            if (state.desired != level.coerceIn(MIN_VOLUME, MAX_VOLUME)) return
+            if (state.desired != BoxVolume.clamp(level)) return
             states.remove(normalizedId)
             state.changed.close()
             state.job
@@ -135,8 +136,6 @@ internal class VolumeCommandCoordinator(
     private enum class SettleResult { CONTINUE, SUCCESS, UNCONFIRMED }
 
     private companion object {
-        const val MIN_VOLUME = 0
-        const val MAX_VOLUME = 10
         const val DEFAULT_DEBOUNCE_MILLIS = 100L
         const val DEFAULT_CONFIRMATION_TIMEOUT_MILLIS = 2_000L
     }
