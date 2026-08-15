@@ -33,7 +33,6 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -447,22 +446,15 @@ fun ProfileEditorScreen(
             }
 
             HorizontalDivider()
-            SectionTitle("WLAN-Verbindung", Icons.Rounded.Wifi)
-            Text(
-                "TeddyRemote verwendet ausschließlich das aktive WLAN und pausiert API und MQTT sofort, sobald kein WLAN mehr verfügbar ist.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LabeledSwitch("Bei WLAN-Rückkehr erneut verbinden", profile.reconnectOnWifiReconnect) {
-                profile = profile.copy(reconnectOnWifiReconnect = it)
-            }
-
-            HorizontalDivider()
             SectionTitle("Verbindungsverhalten", Icons.Rounded.PlayArrow)
             LabeledSwitch("Beim App-Start verbinden", profile.connectOnAppStart) {
                 profile = profile.copy(connectOnAppStart = it)
             }
             LabeledSwitch("Automatisch neu verbinden", profile.autoReconnect) {
                 profile = profile.copy(autoReconnect = it)
+            }
+            LabeledSwitch("Bei WLAN-Rückkehr erneut verbinden", profile.reconnectOnWifiReconnect) {
+                profile = profile.copy(reconnectOnWifiReconnect = it)
             }
             if (profile.autoReconnect) {
                 NumberField("Maximale Retries (0 = unbegrenzt)", profile.maxRetries, Modifier.fillMaxWidth()) {
