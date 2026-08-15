@@ -3,6 +3,7 @@ package de.teddycloud.teddyremote.model
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.serialization.json.Json
 
 class ConnectionProfileTest {
     @Test
@@ -34,14 +35,14 @@ class ConnectionProfileTest {
     }
 
     @Test
-    fun `normalizes and deduplicates home ssids without changing case`() {
-        val profile = ConnectionProfile(
-            homeSsidPrimary = "  Home-WLAN  ",
-            homeSsidSecondary = "Home-WLAN",
-        ).normalized()
+    fun `ignores retired home ssid fields in stored profiles`() {
+        val profile = tolerantProfileJson.decodeFromString<ConnectionProfile>(
+            """{"name":"Zuhause","homeSsidPrimary":"Home","homeSsidSecondary":"Workshop"}""",
+        )
 
-        assertEquals("Home-WLAN", profile.homeSsidPrimary)
-        assertEquals("", profile.homeSsidSecondary)
-        assertEquals(listOf("Home-WLAN"), profile.homeSsids)
+        assertEquals("Zuhause", profile.name)
+        assertTrue(profile.reconnectOnWifiReconnect)
     }
 }
+
+private val tolerantProfileJson = Json { ignoreUnknownKeys = true }

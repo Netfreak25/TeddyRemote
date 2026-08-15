@@ -1,57 +1,22 @@
 package de.teddycloud.teddyremote.repository
 
-import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.WifiGateState
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class WifiGatePolicyTest {
     @Test
-    fun `allows every wifi when no home ssid is configured`() {
+    fun `allows the active wifi transport`() {
         val snapshot = WifiNetworkSnapshot(wifiAvailable = true)
 
-        assertEquals(WifiGateState.AVAILABLE, evaluateWifiGate(snapshot, ConnectionProfile()))
+        assertEquals(WifiGateState.AVAILABLE, evaluateWifiGate(snapshot))
     }
 
     @Test
     fun `blocks non wifi transports`() {
         assertEquals(
             WifiGateState.NO_WIFI,
-            evaluateWifiGate(WifiNetworkSnapshot(), ConnectionProfile()),
-        )
-    }
-
-    @Test
-    fun `accepts either configured home ssid with exact case`() {
-        val profile = ConnectionProfile(homeSsidPrimary = "Home", homeSsidSecondary = "Workshop")
-        val base = WifiNetworkSnapshot(
-            wifiAvailable = true,
-            locationPermissionGranted = true,
-            locationEnabled = true,
-        )
-
-        assertEquals(WifiGateState.AVAILABLE, evaluateWifiGate(base.copy(ssid = "Workshop"), profile))
-        assertEquals(WifiGateState.NOT_HOME_WIFI, evaluateWifiGate(base.copy(ssid = "workshop"), profile))
-    }
-
-    @Test
-    fun `requires permission and readable ssid only for restricted profiles`() {
-        val profile = ConnectionProfile(homeSsidPrimary = "Home")
-
-        assertEquals(
-            WifiGateState.PERMISSION_REQUIRED,
-            evaluateWifiGate(WifiNetworkSnapshot(wifiAvailable = true), profile),
-        )
-        assertEquals(
-            WifiGateState.SSID_UNAVAILABLE,
-            evaluateWifiGate(
-                WifiNetworkSnapshot(
-                    wifiAvailable = true,
-                    locationPermissionGranted = true,
-                    locationEnabled = false,
-                ),
-                profile,
-            ),
+            evaluateWifiGate(WifiNetworkSnapshot()),
         )
     }
 

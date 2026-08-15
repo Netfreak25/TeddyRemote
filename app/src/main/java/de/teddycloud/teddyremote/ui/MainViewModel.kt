@@ -136,10 +136,6 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.repository.disconnect() }
     }
 
-    fun refreshWifiAccess() {
-        container.repository.refreshWifiAccess()
-    }
-
     fun refresh() {
         if (transient.value.isRefreshing) return
         transient.value = transient.value.copy(isRefreshing = true)

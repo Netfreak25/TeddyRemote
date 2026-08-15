@@ -12,18 +12,12 @@ enum class LinkStatus {
 enum class WifiGateState {
     AVAILABLE,
     NO_WIFI,
-    NOT_HOME_WIFI,
-    PERMISSION_REQUIRED,
-    SSID_UNAVAILABLE,
 }
 
 val WifiGateState.userMessage: String
     get() = when (this) {
         WifiGateState.AVAILABLE -> "WLAN verfügbar"
         WifiGateState.NO_WIFI -> "Kein WLAN"
-        WifiGateState.NOT_HOME_WIFI -> "Nicht im Home-WLAN"
-        WifiGateState.PERMISSION_REQUIRED -> "WLAN-Zugriff erforderlich"
-        WifiGateState.SSID_UNAVAILABLE -> "WLAN-Name nicht verfügbar"
     }
 
 data class CertificateCandidate(

@@ -46,7 +46,6 @@ fun ConnectionOverviewScreen(
     state: MainUiState,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
-    onRequestWifiPermission: () -> Unit,
     onOpenBoxes: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -137,15 +136,6 @@ fun ConnectionOverviewScreen(
                     if (state.connection.desiredConnected) {
                         OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) {
                             Text("Verbindung trennen")
-                        }
-                    } else if (
-                        state.connection.wifiGate == WifiGateState.PERMISSION_REQUIRED ||
-                        state.connection.wifiGate == WifiGateState.SSID_UNAVAILABLE
-                    ) {
-                        Button(onClick = onRequestWifiPermission, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Rounded.Wifi, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("WLAN-Zugriff prüfen")
                         }
                     } else {
                         Button(

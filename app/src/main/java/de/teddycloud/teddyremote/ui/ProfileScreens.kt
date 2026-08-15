@@ -294,7 +294,6 @@ fun ProfileEditorScreen(
     onTestMqtt: (ConnectionProfile, String) -> Unit,
     onImportMqtt: (ConnectionProfile) -> Unit,
     onAcceptCertificate: (CertificateCandidate) -> Unit,
-    onRequestWifiPermission: () -> Unit,
 ) {
     var profile by remember(initialProfile.id) { mutableStateOf(initialProfile) }
     var password by remember(initialProfile.id) { mutableStateOf(initialPassword) }
@@ -448,39 +447,13 @@ fun ProfileEditorScreen(
             }
 
             HorizontalDivider()
-            SectionTitle("Home-WLAN", Icons.Rounded.Wifi)
+            SectionTitle("WLAN-Verbindung", Icons.Rounded.Wifi)
             Text(
-                "TeddyRemote verwendet ausschließlich WLAN. Sind beide Felder leer, ist jedes WLAN erlaubt.",
+                "TeddyRemote verwendet ausschließlich das aktive WLAN und pausiert API und MQTT sofort, sobald kein WLAN mehr verfügbar ist.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(
-                value = profile.homeSsidPrimary,
-                onValueChange = { profile = profile.copy(homeSsidPrimary = it) },
-                label = { Text("Home-SSID 1 (optional)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = profile.homeSsidSecondary,
-                onValueChange = { profile = profile.copy(homeSsidSecondary = it) },
-                label = { Text("Home-SSID 2 (optional)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
             )
             LabeledSwitch("Bei WLAN-Rückkehr erneut verbinden", profile.reconnectOnWifiReconnect) {
                 profile = profile.copy(reconnectOnWifiReconnect = it)
-            }
-            if (profile.homeSsids.isNotEmpty()) {
-                OutlinedButton(onClick = onRequestWifiPermission, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Wifi, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("WLAN-Zugriff prüfen")
-                }
-                Text(
-                    "Die Freigabe wird nur benötigt, um den Namen des aktuell verbundenen WLANs zu vergleichen. Es findet kein Scan statt.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
 
             HorizontalDivider()
