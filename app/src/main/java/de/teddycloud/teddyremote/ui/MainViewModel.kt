@@ -146,8 +146,12 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.repository.refreshMetadata(boxId) }
     }
 
-    fun playback(boxId: String, action: String, chapter: Int? = null) {
-        viewModelScope.launch { container.repository.playback(boxId, action, chapter) }
+    fun playback(boxId: String, action: String) {
+        viewModelScope.launch { container.repository.playback(boxId, action) }
+    }
+
+    fun seek(boxId: String, chapter: Int, positionMs: Long) {
+        viewModelScope.launch { container.repository.seek(boxId, chapter, positionMs) }
     }
 
     fun setVolume(boxId: String, level: Int) {

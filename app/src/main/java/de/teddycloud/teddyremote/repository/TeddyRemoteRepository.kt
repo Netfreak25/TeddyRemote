@@ -233,8 +233,12 @@ class TeddyRemoteRepository(
         }
     }
 
-    suspend fun playback(boxId: String, action: String, chapter: Int? = null) {
-        issueCommand(boxId, "playback:$action") { client -> client.playback(boxId, action, chapter) }
+    suspend fun playback(boxId: String, action: String) {
+        issueCommand(boxId, "playback:$action") { client -> client.playback(boxId, action) }
+    }
+
+    suspend fun seek(boxId: String, chapter: Int, positionMs: Long) {
+        issueCommand(boxId, "playback:seek") { client -> client.seek(boxId, chapter, positionMs) }
     }
 
     suspend fun setVolume(boxId: String, level: Int) {

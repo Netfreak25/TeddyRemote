@@ -92,7 +92,7 @@ class BoxMediaSessionManager(
                 }
 
                 override fun onSkipToQueueItem(id: Long) {
-                    scope.launch { repository.playback(model.box.id, "setPosition", id.toInt()) }
+                    scope.launch { repository.seek(model.box.id, id.toInt(), 0L) }
                 }
 
                 override fun onCustomAction(action: String, extras: Bundle?) {

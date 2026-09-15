@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,12 +31,14 @@ import androidx.compose.material.icons.rounded.Brightness6
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Replay30
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.AssistChip
@@ -43,6 +46,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
@@ -70,6 +74,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -83,6 +88,7 @@ import de.teddycloud.teddyremote.model.BoxUiModel
 import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.model.BedtimeRuntime
 import de.teddycloud.teddyremote.model.LinkStatus
+import de.teddycloud.teddyremote.model.PlaybackRuntime
 import de.teddycloud.teddyremote.model.WifiGateState
 import de.teddycloud.teddyremote.model.userMessage
 import java.time.Instant
@@ -90,6 +96,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,7 +104,8 @@ fun HomeScreen(
     state: MainUiState,
     onRefresh: () -> Unit,
     onOpenOverview: () -> Unit,
-    onPlayback: (String, String, Int?) -> Unit,
+    onPlayback: (String, String) -> Unit,
+    onSeek: (String, Int, Long) -> Unit,
     onRefreshPlaylist: (String) -> Unit,
     onVolume: (String, Int) -> Unit,
     onPing: (String) -> Unit,
@@ -171,7 +179,8 @@ fun HomeScreen(
                             TonieboxCard(
                                 model = model,
                                 highlighted = state.focusedBoxId?.equals(model.box.id, ignoreCase = true) == true,
-                                onPlayback = { action, chapter -> onPlayback(model.box.id, action, chapter) },
+                                onPlayback = { action -> onPlayback(model.box.id, action) },
+                                onSeek = { chapter, positionMs -> onSeek(model.box.id, chapter, positionMs) },
                                 onRefreshPlaylist = { onRefreshPlaylist(model.box.id) },
                                 onVolume = { onVolume(model.box.id, it) },
                                 onPing = { onPing(model.box.id) },
@@ -192,7 +201,8 @@ fun HomeScreen(
 private fun TonieboxCard(
     model: BoxUiModel,
     highlighted: Boolean,
-    onPlayback: (String, Int?) -> Unit,
+    onPlayback: (String) -> Unit,
+    onSeek: (Int, Long) -> Unit,
     onRefreshPlaylist: () -> Unit,
     onVolume: (Int) -> Unit,
     onPing: () -> Unit,
@@ -207,15 +217,45 @@ private fun TonieboxCard(
     var sleepDialogVisible by remember(model.box.id) { mutableStateOf(false) }
     val runtime = model.box.runtime
     val confirmedVolume = model.desiredVolume ?: runtime.volume.level ?: BoxVolume.MIN_LEVEL
-    var draggedVolume by remember(model.box.id) { mutableStateOf<Float?>(null) }
-    var submittedVolume by remember(model.box.id) { mutableStateOf<Int?>(null) }
-    val volume = draggedVolume ?: confirmedVolume.toFloat()
-    LaunchedEffect(confirmedVolume, submittedVolume) {
-        val submitted = submittedVolume ?: return@LaunchedEffect
-        if (confirmedVolume == submitted) {
-            draggedVolume = null
-            submittedVolume = null
+    val currentChapter = runtime.playback.chapter
+    val fallbackDurationSeconds = model.metadata?.playlist
+        ?.firstOrNull { it.index == currentChapter }
+        ?.durationSeconds
+    val calculatedProgress = rememberChapterProgress(runtime.playback, fallbackDurationSeconds)
+    var draggedSeekMs by remember(model.box.id, runtime.playback.ruid, runtime.playback.contentVersion, currentChapter) {
+        mutableStateOf<Long?>(null)
+    }
+    var pendingSeek by remember(model.box.id, runtime.playback.ruid, runtime.playback.contentVersion, currentChapter) {
+        mutableStateOf<PendingSeek?>(null)
+    }
+    val displayedProgress = calculatedProgress?.let { progress ->
+        progress.copy(
+            positionMs = (draggedSeekMs ?: pendingSeek?.positionMs ?: progress.positionMs)
+                .coerceIn(0L, progress.durationMs),
+        )
+    }
+    LaunchedEffect(runtime.playback.chapterUntilMs, currentChapter, model.commandError) {
+        val pending = pendingSeek ?: return@LaunchedEffect
+        if (
+            model.commandError != null ||
+            currentChapter != pending.chapter ||
+            runtime.playback.chapterUntilMs != pending.baselineChapterUntilMs
+        ) {
+            pendingSeek = null
         }
+    }
+    LaunchedEffect(pendingSeek) {
+        val pending = pendingSeek ?: return@LaunchedEffect
+        delay(SEEK_CONFIRMATION_TIMEOUT_MS)
+        if (pendingSeek == pending) pendingSeek = null
+    }
+    fun submitSeek(positionMs: Long) {
+        val progress = calculatedProgress ?: return
+        val chapter = currentChapter ?: return
+        val target = positionMs.coerceIn(0L, progress.lastSeekableMs)
+        draggedSeekMs = null
+        pendingSeek = PendingSeek(chapter, target, runtime.playback.chapterUntilMs)
+        onSeek(chapter, target)
     }
     var brightness by remember(model.box.id, model.ringBrightness) {
         mutableFloatStateOf((model.ringBrightness ?: 100).toFloat())
@@ -299,6 +339,11 @@ private fun TonieboxCard(
                             Text(it.uppercase(), style = MaterialTheme.typography.labelSmall)
                         }
                     }
+                    VolumeControlButton(
+                        volume = confirmedVolume,
+                        enabled = runtime.controls.volume && model.pendingCommand == null,
+                        onVolume = onVolume,
+                    )
                 }
             }
 
@@ -346,52 +391,75 @@ private fun TonieboxCard(
                     }
                 }
 
+                val playbackEnabled = runtime.controls.playback && model.pendingCommand == null
+                val seekEnabled = playbackEnabled && displayedProgress != null && displayedProgress.durationMs > 1L
                 Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(
-                    enabled = runtime.controls.playback && model.pendingCommand == null,
-                    onClick = { onPlayback("prev", null) },
-                ) { Icon(Icons.Rounded.SkipPrevious, "Vorheriges Kapitel") }
-                FilledIconButton(
-                    enabled = runtime.controls.playback && model.pendingCommand == null,
-                    onClick = { onPlayback(if (runtime.playback.isPlaying) "pause" else "start", null) },
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (model.pendingCommand?.startsWith("playback") == true) {
-                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(if (runtime.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Play/Pause")
+                    IconButton(
+                        enabled = playbackEnabled,
+                        onClick = { onPlayback("prev") },
+                    ) { Icon(Icons.Rounded.SkipPrevious, "Vorheriges Kapitel") }
+                    IconButton(
+                        enabled = seekEnabled,
+                        onClick = {
+                            displayedProgress?.let {
+                                submitSeek(PlaybackProgress.shifted(it, -SEEK_STEP_MS))
+                            }
+                        },
+                    ) { Icon(Icons.Rounded.Replay30, "30 Sekunden zurück") }
+                    FilledIconButton(
+                        enabled = playbackEnabled,
+                        onClick = { onPlayback(if (runtime.playback.isPlaying) "pause" else "start") },
+                        modifier = Modifier.size(64.dp),
+                    ) {
+                        if (model.pendingCommand?.startsWith("playback") == true) {
+                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                if (runtime.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                "Play/Pause",
+                                Modifier.size(32.dp),
+                            )
+                        }
                     }
-                }
-                IconButton(
-                    enabled = runtime.controls.playback && model.pendingCommand == null,
-                    onClick = { onPlayback("next", null) },
-                ) { Icon(Icons.Rounded.SkipNext, "Nächstes Kapitel") }
+                    IconButton(
+                        enabled = seekEnabled,
+                        onClick = {
+                            displayedProgress?.let {
+                                submitSeek(PlaybackProgress.shifted(it, SEEK_STEP_MS))
+                            }
+                        },
+                    ) { Icon(Icons.Rounded.Forward30, "30 Sekunden vor") }
+                    IconButton(
+                        enabled = playbackEnabled,
+                        onClick = { onPlayback("next") },
+                    ) { Icon(Icons.Rounded.SkipNext, "Nächstes Kapitel") }
                 }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Rounded.VolumeUp, null)
                 Slider(
-                    value = volume,
-                    onValueChange = {
-                        submittedVolume = null
-                        draggedVolume = it
-                    },
+                    value = displayedProgress?.positionMs?.toFloat() ?: 0f,
+                    onValueChange = { draggedSeekMs = it.roundToLong() },
                     onValueChangeFinished = {
-                        val requestedVolume = BoxVolume.clamp(volume.roundToInt())
-                        draggedVolume = requestedVolume.toFloat()
-                        submittedVolume = requestedVolume
-                        onVolume(requestedVolume)
+                        draggedSeekMs?.let(::submitSeek)
                     },
-                    enabled = runtime.controls.volume && model.pendingCommand == null,
-                    valueRange = BoxVolume.MIN_LEVEL.toFloat()..BoxVolume.MAX_LEVEL.toFloat(),
-                    steps = BoxVolume.SLIDER_STEPS,
-                    modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                    enabled = seekEnabled,
+                    valueRange = 0f..(displayedProgress?.lastSeekableMs?.toFloat() ?: 1f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                Text(volume.roundToInt().toString(), style = MaterialTheme.typography.labelLarge)
-            }
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        displayedProgress?.positionMs?.let(PlaybackProgress::formatTime) ?: "--:--",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        displayedProgress?.remainingMs?.let { "−${PlaybackProgress.formatTime(it)}" } ?: "−--:--",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
 
             model.commandError?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -446,7 +514,7 @@ private fun TonieboxCard(
                                 }
                                 IconButton(
                                     enabled = runtime.controls.playback,
-                                    onClick = { onPlayback("setPosition", track.index) },
+                                    onClick = { onSeek(track.index, 0L) },
                                 ) { Icon(Icons.Rounded.PlayArrow, "Kapitel abspielen") }
                             }
                         }
@@ -759,6 +827,96 @@ private fun rememberBedtimeRemaining(bedtime: BedtimeRuntime): Long? {
 }
 
 @Composable
+private fun rememberChapterProgress(
+    playback: PlaybackRuntime,
+    fallbackDurationSeconds: Long?,
+): ChapterProgress? {
+    val progress by produceState<ChapterProgress?>(
+        initialValue = PlaybackProgress.calculate(playback, fallbackDurationSeconds, System.currentTimeMillis()),
+        playback.status,
+        playback.updatedAt,
+        playback.chapterUntilMs,
+        playback.chapterDuration,
+        fallbackDurationSeconds,
+    ) {
+        while (true) {
+            value = PlaybackProgress.calculate(playback, fallbackDurationSeconds, System.currentTimeMillis())
+            if (!playback.isPlaying || value?.remainingMs == 0L) break
+            delay(PLAYBACK_PROGRESS_TICK_MS)
+        }
+    }
+    return progress
+}
+
+@Composable
+private fun VolumeControlButton(
+    volume: Int,
+    enabled: Boolean,
+    onVolume: (Int) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var submittedVolume by remember { mutableStateOf<Int?>(null) }
+    var displayedVolume by remember { mutableFloatStateOf(volume.toFloat()) }
+    var isDragging by remember { mutableStateOf(false) }
+    LaunchedEffect(volume, submittedVolume, isDragging) {
+        if (isDragging) return@LaunchedEffect
+        val submitted = submittedVolume
+        if (submitted == null || submitted == volume) {
+            displayedVolume = volume.toFloat()
+            submittedVolume = null
+        }
+    }
+
+    Box {
+        OutlinedButton(
+            onClick = { expanded = true },
+            enabled = enabled,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+        ) {
+            Icon(Icons.AutoMirrored.Rounded.VolumeUp, "Lautstärke $volume")
+            Spacer(Modifier.width(4.dp))
+            Text(volume.toString(), style = MaterialTheme.typography.labelLarge)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(displayedVolume.roundToInt().toString(), style = MaterialTheme.typography.titleMedium)
+                Box(
+                    modifier = Modifier.width(56.dp).height(190.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Slider(
+                        value = displayedVolume,
+                        onValueChange = {
+                            isDragging = true
+                            displayedVolume = it
+                        },
+                        onValueChangeFinished = {
+                            isDragging = false
+                            val requestedVolume = BoxVolume.clamp(displayedVolume.roundToInt())
+                            displayedVolume = requestedVolume.toFloat()
+                            submittedVolume = requestedVolume
+                            onVolume(requestedVolume)
+                        },
+                        enabled = enabled,
+                        valueRange = BoxVolume.MIN_LEVEL.toFloat()..BoxVolume.MAX_LEVEL.toFloat(),
+                        steps = BoxVolume.SLIDER_STEPS,
+                        modifier = Modifier.width(180.dp).rotate(-90f),
+                    )
+                }
+                Text("Lautstärke", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
 private fun StatusChip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
     AssistChip(onClick = {}, label = { Text(label) }, leadingIcon = { Icon(icon, null, Modifier.size(18.dp)) })
 }
@@ -797,6 +955,12 @@ private fun currentTrackTitle(model: BoxUiModel): String {
     val chapter = model.box.runtime.playback.chapter ?: 0
     return model.metadata?.playlist?.getOrNull(chapter)?.title ?: "Kapitel ${chapter + 1}"
 }
+
+private data class PendingSeek(
+    val chapter: Int,
+    val positionMs: Long,
+    val baselineChapterUntilMs: Long?,
+)
 
 private val RUID_PATTERN = Regex("^[0-9A-Fa-f]{16}$")
 
@@ -838,6 +1002,9 @@ private fun isRemoteControlVisible(online: Boolean, lastConnection: Long): Boole
 }
 
 private const val REMOTE_CONTROL_GRACE_SECONDS = 3 * 60L
+private const val PLAYBACK_PROGRESS_TICK_MS = 1_000L
+private const val SEEK_STEP_MS = 30_000L
+private const val SEEK_CONFIRMATION_TIMEOUT_MS = 3_000L
 private const val BEDTIME_MINUTES_MIN = 5
 private const val BEDTIME_MINUTES_MAX = 24 * 60
 private const val BEDTIME_MINUTES_STEP = 5

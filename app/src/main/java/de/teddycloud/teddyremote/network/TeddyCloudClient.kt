@@ -81,13 +81,20 @@ class TeddyCloudClient private constructor(
         ).close()
     }
 
-    suspend fun playback(overlay: String, action: String, chapter: Int? = null): CommandResponse {
-        val body = if (action == "setPosition") {
-            """{"action":"setPosition","chapter":${chapter ?: 0},"ms":0}"""
-        } else {
-            """{"action":"$action"}"""
+    suspend fun playback(overlay: String, action: String): CommandResponse =
+        parseCommand(api.playback(overlay, """{"action":"$action"}""".toRequestBody(JSON_MEDIA)))
+
+    suspend fun seek(overlay: String, chapter: Int, positionMs: Long): CommandResponse {
+        require(chapter >= 0) { "Chapter index must not be negative" }
+        require(positionMs in 0L..MAX_SEEK_POSITION_MS) {
+            "Seek position must fit into an unsigned 32-bit millisecond value"
         }
-        return parseCommand(api.playback(overlay, body.toRequestBody(JSON_MEDIA)))
+        return parseCommand(
+            api.playback(
+                overlay,
+                """{"action":"setPosition","chapter":$chapter,"ms":$positionMs}""".toRequestBody(JSON_MEDIA),
+            ),
+        )
     }
 
     suspend fun setVolume(overlay: String, level: Int): CommandResponse {
@@ -224,6 +231,7 @@ class TeddyCloudClient private constructor(
         private const val MQTT_TOPIC_SETTING = "mqtt.topic"
         private const val MQTT_TLS_SETTING = "mqtt.tls_enabled"
         private const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
+        private const val MAX_SEEK_POSITION_MS = 0xFFFF_FFFFL
         private const val BEDTIME_DURATION_MIN = 300
         private const val BEDTIME_DURATION_MAX = 86_400
         private val externalImageHttpClient = OkHttpClient.Builder()

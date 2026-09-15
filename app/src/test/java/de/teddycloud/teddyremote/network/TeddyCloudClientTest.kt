@@ -81,6 +81,32 @@ class TeddyCloudClientTest {
     }
 
     @Test
+    fun `sends chapter-relative seek position without remapping`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"ok":true,"message":"queued"}"""))
+
+        val response = client.seek("D4594404DEAC", chapter = 2, positionMs = 90_000L)
+        val request = server.takeRequest()
+
+        assertTrue(response.ok)
+        assertEquals("/api/box/playback?overlay=D4594404DEAC", request.path)
+        assertEquals("{\"action\":\"setPosition\",\"chapter\":2,\"ms\":90000}", request.body.readUtf8())
+    }
+
+    @Test
+    fun `rejects invalid seek values before the request`() = runTest {
+        val invalidOperations: List<suspend () -> Unit> = listOf(
+            { client.seek("D4594404DEAC", chapter = -1, positionMs = 0L) },
+            { client.seek("D4594404DEAC", chapter = 0, positionMs = -1L) },
+            { client.seek("D4594404DEAC", chapter = 0, positionMs = 0x1_0000_0000L) },
+        )
+        invalidOperations.forEach { operation ->
+            runCatching { operation() }.onSuccess { error("Invalid seek was accepted") }
+        }
+
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
     fun `sends bedtime and sleep commands with exact payloads`() = runTest {
         server.enqueue(MockResponse().setBody("""{"ok":true,"message":"bedtime queued"}"""))
         server.enqueue(MockResponse().setBody("""{"ok":true,"message":"sleep queued"}"""))

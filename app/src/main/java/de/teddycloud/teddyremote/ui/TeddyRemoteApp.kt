@@ -107,6 +107,7 @@ fun TeddyRemoteApp(
                         onRefresh = viewModel::refresh,
                         onOpenOverview = { viewModel.navigate(AppScreen.OVERVIEW) },
                         onPlayback = viewModel::playback,
+                        onSeek = viewModel::seek,
                         onRefreshPlaylist = viewModel::refreshPlaylist,
                         onVolume = viewModel::setVolume,
                         onPing = viewModel::ping,
