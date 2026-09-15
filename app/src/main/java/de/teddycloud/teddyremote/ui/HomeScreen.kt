@@ -958,13 +958,13 @@ private fun VolumeControlButton(
             onDismissRequest = { expanded = false },
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(displayedVolume.roundToInt().toString(), style = MaterialTheme.typography.titleMedium)
                 Box(
-                    modifier = Modifier.width(56.dp).height(190.dp),
+                    modifier = Modifier.width(VOLUME_SLIDER_CROSS_AXIS).height(VOLUME_SLIDER_CONTAINER_HEIGHT),
                     contentAlignment = Alignment.Center,
                 ) {
                     Slider(
@@ -983,7 +983,7 @@ private fun VolumeControlButton(
                         enabled = enabled,
                         valueRange = BoxVolume.MIN_LEVEL.toFloat()..BoxVolume.MAX_LEVEL.toFloat(),
                         steps = BoxVolume.SLIDER_STEPS,
-                        modifier = Modifier.width(180.dp).rotate(-90f),
+                        modifier = Modifier.width(VOLUME_SLIDER_LENGTH).rotate(-90f),
                     )
                 }
                 Text("Lautstärke", style = MaterialTheme.typography.labelSmall)
@@ -991,6 +991,10 @@ private fun VolumeControlButton(
         }
     }
 }
+
+private val VOLUME_SLIDER_LENGTH = 280.dp
+private val VOLUME_SLIDER_CONTAINER_HEIGHT = 300.dp
+private val VOLUME_SLIDER_CROSS_AXIS = 72.dp
 
 @Composable
 private fun StatusChip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
