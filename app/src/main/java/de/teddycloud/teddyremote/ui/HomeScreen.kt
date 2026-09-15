@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -983,7 +984,7 @@ private fun VolumeControlButton(
                         enabled = enabled,
                         valueRange = BoxVolume.MIN_LEVEL.toFloat()..BoxVolume.MAX_LEVEL.toFloat(),
                         steps = BoxVolume.SLIDER_STEPS,
-                        modifier = Modifier.width(VOLUME_SLIDER_LENGTH).rotate(-90f),
+                        modifier = Modifier.requiredWidth(VOLUME_SLIDER_LENGTH).rotate(-90f),
                     )
                 }
                 Text("Lautstärke", style = MaterialTheme.typography.labelSmall)
