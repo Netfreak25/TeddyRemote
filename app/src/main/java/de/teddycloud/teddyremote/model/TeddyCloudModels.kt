@@ -130,6 +130,7 @@ data class TonieMetadata(
     val subtitle: String = "",
     val pictureUrl: String? = null,
     val playlist: List<PlaylistTrack> = emptyList(),
+    val playlistComplete: Boolean = false,
 )
 
 data class BoxUiModel(
@@ -141,6 +142,7 @@ data class BoxUiModel(
     val desiredVolume: Int? = null,
     val pendingCommand: String? = null,
     val commandError: String? = null,
+    val resumeOffer: ResumeOffer? = null,
 )
 
 @Serializable

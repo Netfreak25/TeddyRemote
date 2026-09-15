@@ -162,6 +162,7 @@ class TeddyCloudClient private constructor(
             subtitle = subtitle,
             pictureUrl = resolveUrl(info.string("picture") ?: sourceInfo.string("picture") ?: tag.string("picture")),
             playlist = normalizedTracks,
+            playlistComplete = count > 0,
         )
     }
 

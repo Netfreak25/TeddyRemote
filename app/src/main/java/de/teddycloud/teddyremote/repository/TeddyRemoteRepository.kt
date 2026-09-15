@@ -1,6 +1,8 @@
 package de.teddycloud.teddyremote.repository
 
 import android.content.Context
+import android.util.Log
+import de.teddycloud.teddyremote.data.PlaybackHistoryStore
 import de.teddycloud.teddyremote.data.ProfilesStore
 import de.teddycloud.teddyremote.model.BatteryRuntime
 import de.teddycloud.teddyremote.model.BedtimeRuntime
@@ -58,6 +60,7 @@ class TeddyRemoteRepository(
     private val networkMonitor: NetworkMonitor = NetworkMonitor(context),
     private val certificateProbe: CertificateProbe = CertificateProbe(),
     private val backoffPolicy: BackoffPolicy = BackoffPolicy(),
+    private val playbackHistoryStore: PlaybackHistoryStore = PlaybackHistoryStore(context),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _connection = MutableStateFlow(ConnectionStatus())
@@ -71,6 +74,7 @@ class TeddyRemoteRepository(
     private var connectionJob: Job? = null
     private var pollingJob: Job? = null
     private var mqttReconnectJob: Job? = null
+    private var playbackHistoryObserveJob: Job? = null
     private var activeProfile: ConnectionProfile? = null
     private var lastWifiGate = WifiGateState.NO_WIFI
     private val connectionLifecycleMutex = Mutex()
@@ -78,6 +82,11 @@ class TeddyRemoteRepository(
     private val metadataKeys = mutableMapOf<String, Pair<String, Long?>>()
     private val boxUpdateMutex = Mutex()
     private val imageCache = RemoteImageCache(context)
+    private val playbackResume = PlaybackResumeCoordinator(
+        scope = scope,
+        storage = playbackHistoryStore,
+        onError = { error -> Log.w(LOG_TAG, "Playback history update failed", error) },
+    )
     private val volumeCommands = VolumeCommandCoordinator(
         scope = scope,
         send = { boxId, level ->
@@ -99,6 +108,15 @@ class TeddyRemoteRepository(
     )
 
     init {
+        scope.launch {
+            playbackResume.offers.collect { offers ->
+                boxUpdateMutex.withLock {
+                    _boxes.value = _boxes.value.map { model ->
+                        model.copy(resumeOffer = offers[model.box.id.uppercase()])
+                    }
+                }
+            }
+        }
         scope.launch {
             combine(networkMonitor.state, profilesStore.state) { wifi, profiles -> wifi to profiles }
                 .collect { (wifi, profiles) ->
@@ -241,6 +259,18 @@ class TeddyRemoteRepository(
         issueCommand(boxId, "playback:seek") { client -> client.seek(boxId, chapter, positionMs) }
     }
 
+    suspend fun resumePlayback(boxId: String) {
+        val target = playbackResume.beginResume(boxId) ?: return
+        val error = issueCommand(boxId, "playback:seek") { client ->
+            client.seek(boxId, target.chapter, target.positionMs)
+        }
+        if (error != null) playbackResume.resumeFailed(boxId, error)
+    }
+
+    suspend fun declineResume(boxId: String) {
+        playbackResume.decline(boxId)
+    }
+
     suspend fun setVolume(boxId: String, level: Int) {
         val boundedLevel = BoxVolume.clamp(level)
         val currentLevel = _boxes.value
@@ -292,18 +322,21 @@ class TeddyRemoteRepository(
         boxId: String,
         command: String,
         operation: suspend (TeddyCloudClient) -> Any?,
-    ) {
-        val client = api ?: return
+    ): String? {
+        val client = api ?: return "Keine API-Verbindung"
         updateBox(boxId) { it.copy(pendingCommand = command, commandError = null) }
-        runCatching { operation(client).also { (it as? CommandResponse)?.requireAccepted() } }
-            .onFailure { error ->
-                updateBox(boxId) { it.copy(pendingCommand = null, commandError = error.userMessage()) }
-                return
-            }
+        val failure = runCatching { operation(client).also { (it as? CommandResponse)?.requireAccepted() } }
+            .exceptionOrNull()
+        if (failure != null) {
+            val message = failure.userMessage()
+            updateBox(boxId) { it.copy(pendingCommand = null, commandError = message) }
+            return message
+        }
         delay(COMMAND_REFRESH_DELAY_MS)
         runCatching { refreshSnapshot(loadStaticData = false) }
             .onFailure { error -> updateBox(boxId) { it.copy(commandError = error.userMessage()) } }
         updateBox(boxId) { it.copy(pendingCommand = null) }
+        return null
     }
 
     private suspend fun awaitBedtimeActive(boxId: String) {
@@ -410,6 +443,9 @@ class TeddyRemoteRepository(
 
     private suspend fun stopNetworkJobsLocked() {
         volumeCommands.cancelAll()
+        playbackHistoryObserveJob?.cancelAndJoin()
+        playbackHistoryObserveJob = null
+        playbackResume.reset()
         connectionJob?.cancelAndJoin()
         connectionJob = null
         pollingJob?.cancelAndJoin()
@@ -585,11 +621,13 @@ class TeddyRemoteRepository(
                         desiredVolume = old?.desiredVolume,
                         pendingCommand = old?.pendingCommand,
                         commandError = old?.commandError,
+                        resumeOffer = playbackResume.offers.value[box.id.uppercase()],
                     )
                 }
             }.awaitAll()
         }
         _boxes.value = models.sortedBy { it.box.boxName.ifBlank { it.box.commonName } }
+        observePlaybackHistory()
     }
 
     private suspend fun metadataFor(
@@ -746,6 +784,25 @@ class TeddyRemoteRepository(
                 )
             }
         }
+        if (valueEvent.field.startsWith("Playback")) schedulePlaybackHistoryObservation()
+    }
+
+    private fun schedulePlaybackHistoryObservation() {
+        playbackHistoryObserveJob?.cancel()
+        playbackHistoryObserveJob = scope.launch {
+            delay(PLAYBACK_IDENTITY_SETTLE_MS)
+            observePlaybackHistory()
+        }
+    }
+
+    private suspend fun observePlaybackHistory() {
+        try {
+            playbackResume.observe(activeProfile?.id, _boxes.value)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            Log.w(LOG_TAG, "Playback history observation failed", error)
+        }
     }
 
     private suspend fun updateBox(boxId: String, transform: suspend (BoxUiModel) -> BoxUiModel) {
@@ -785,6 +842,7 @@ class TeddyRemoteRepository(
     private fun Throwable.causeChain(): Sequence<Throwable> = generateSequence(this) { it.cause }
 
     private companion object {
+        const val LOG_TAG = "TeddyRemoteRepository"
         const val TB2_GENERATION = 2
         const val COMMAND_REFRESH_DELAY_MS = 500L
         const val SHUTDOWN_BEDTIME_SECONDS = 300
@@ -794,6 +852,7 @@ class TeddyRemoteRepository(
         const val FOREGROUND_POLL_MS = 2_000L
         const val BACKGROUND_PLAYING_POLL_MS = 5_000L
         const val BACKGROUND_IDLE_POLL_MS = 15_000L
+        const val PLAYBACK_IDENTITY_SETTLE_MS = 300L
     }
 }
 

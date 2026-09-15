@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay30
+import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.AssistChip
@@ -89,6 +90,7 @@ import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.model.BedtimeRuntime
 import de.teddycloud.teddyremote.model.LinkStatus
 import de.teddycloud.teddyremote.model.PlaybackRuntime
+import de.teddycloud.teddyremote.model.ResumeOffer
 import de.teddycloud.teddyremote.model.WifiGateState
 import de.teddycloud.teddyremote.model.userMessage
 import java.time.Instant
@@ -106,6 +108,8 @@ fun HomeScreen(
     onOpenOverview: () -> Unit,
     onPlayback: (String, String) -> Unit,
     onSeek: (String, Int, Long) -> Unit,
+    onResumePlayback: (String) -> Unit,
+    onDeclineResume: (String) -> Unit,
     onRefreshPlaylist: (String) -> Unit,
     onVolume: (String, Int) -> Unit,
     onPing: (String) -> Unit,
@@ -181,6 +185,8 @@ fun HomeScreen(
                                 highlighted = state.focusedBoxId?.equals(model.box.id, ignoreCase = true) == true,
                                 onPlayback = { action -> onPlayback(model.box.id, action) },
                                 onSeek = { chapter, positionMs -> onSeek(model.box.id, chapter, positionMs) },
+                                onResumePlayback = { onResumePlayback(model.box.id) },
+                                onDeclineResume = { onDeclineResume(model.box.id) },
                                 onRefreshPlaylist = { onRefreshPlaylist(model.box.id) },
                                 onVolume = { onVolume(model.box.id, it) },
                                 onPing = { onPing(model.box.id) },
@@ -203,6 +209,8 @@ private fun TonieboxCard(
     highlighted: Boolean,
     onPlayback: (String) -> Unit,
     onSeek: (Int, Long) -> Unit,
+    onResumePlayback: () -> Unit,
+    onDeclineResume: () -> Unit,
     onRefreshPlaylist: () -> Unit,
     onVolume: (Int) -> Unit,
     onPing: () -> Unit,
@@ -461,6 +469,15 @@ private fun TonieboxCard(
                     )
                 }
 
+                model.resumeOffer?.let { offer ->
+                    ResumePlaybackOffer(
+                        offer = offer,
+                        enabled = playbackEnabled && !offer.pending,
+                        onResume = onResumePlayback,
+                        onDecline = onDeclineResume,
+                    )
+                }
+
             model.commandError?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
@@ -577,6 +594,65 @@ private fun TonieboxCard(
                 onSleep()
             },
         )
+    }
+}
+
+@Composable
+private fun ResumePlaybackOffer(
+    offer: ResumeOffer,
+    enabled: Boolean,
+    onResume: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Restore, null)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Weiterhören?", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "${offer.chapterTitle} · ${PlaybackProgress.formatTime(offer.positionMs)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (offer.contentTitle.isNotBlank()) {
+                        Text(
+                            offer.contentTitle,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            offer.error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDecline, enabled = enabled) { Text("Nein") }
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = onResume, enabled = enabled) {
+                    if (offer.pending) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Fortsetzen")
+                    }
+                }
+            }
+        }
     }
 }
 

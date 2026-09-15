@@ -154,6 +154,14 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.repository.seek(boxId, chapter, positionMs) }
     }
 
+    fun resumePlayback(boxId: String) {
+        viewModelScope.launch { container.repository.resumePlayback(boxId) }
+    }
+
+    fun declineResume(boxId: String) {
+        viewModelScope.launch { container.repository.declineResume(boxId) }
+    }
+
     fun setVolume(boxId: String, level: Int) {
         viewModelScope.launch { container.repository.setVolume(boxId, level) }
     }
