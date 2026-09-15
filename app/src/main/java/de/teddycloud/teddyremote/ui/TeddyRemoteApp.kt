@@ -67,18 +67,18 @@ fun TeddyRemoteApp(
                     state.needsOnboarding && state.screen != AppScreen.PROFILE_EDITOR -> OnboardingScreen(
                         onCreateProfile = { viewModel.editProfile(null) },
                     )
-                    state.screen == AppScreen.PROFILE_EDITOR -> ProfileEditorScreen(
-                        initialProfile = requireNotNull(state.editingProfile),
-                        initialPassword = state.editingPassword,
-                        apiTest = state.apiTest,
-                        mqttTest = state.mqttTest,
-                        mqttImport = state.mqttImport,
+                    state.screen == AppScreen.PROFILE_EDITOR && state.profileEditor != null -> ProfileEditorScreen(
+                        editor = requireNotNull(state.profileEditor),
                         onBack = { viewModel.navigate(if (state.needsOnboarding) AppScreen.OVERVIEW else AppScreen.SETTINGS) },
                         onSave = viewModel::saveProfile,
+                        onProfileChange = viewModel::updateEditingProfile,
+                        onPasswordChange = viewModel::updateEditingPassword,
                         onTestApi = viewModel::testApi,
                         onTestMqtt = viewModel::testMqtt,
                         onImportMqtt = viewModel::importMqttSettings,
                         onAcceptCertificate = viewModel::acceptTestCertificate,
+                        onRejectCertificate = viewModel::rejectTestCertificate,
+                        onResetCertificate = viewModel::resetTestCertificate,
                     )
                     state.screen == AppScreen.DIAGNOSTICS -> DiagnosticsScreen(
                         state = state,

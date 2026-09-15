@@ -22,8 +22,8 @@ android {
         applicationId = "de.teddycloud.teddyremote"
         minSdk = 29
         targetSdk = 36
-        versionCode = 24
-        versionName = "0.1.23"
+        versionCode = 25
+        versionName = "0.1.24"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

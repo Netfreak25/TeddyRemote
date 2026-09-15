@@ -1,5 +1,6 @@
 package de.teddycloud.teddyremote.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Warning
@@ -53,7 +55,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.teddycloud.teddyremote.BuildConfig
 import de.teddycloud.teddyremote.model.CertificateCandidate
+import de.teddycloud.teddyremote.model.CertificateTarget
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.LinkStatus
 import de.teddycloud.teddyremote.model.ThemeMode
@@ -282,43 +284,35 @@ fun SettingsScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileEditorScreen(
-    initialProfile: ConnectionProfile,
-    initialPassword: String,
-    apiTest: ProfileTestState,
-    mqttTest: ProfileTestState,
-    mqttImport: MqttImportState,
+    editor: ProfileEditorUiState,
     onBack: () -> Unit,
-    onSave: (ConnectionProfile, String, Boolean) -> Unit,
-    onTestApi: (ConnectionProfile) -> Unit,
-    onTestMqtt: (ConnectionProfile, String) -> Unit,
-    onImportMqtt: (ConnectionProfile) -> Unit,
+    onSave: (Boolean) -> Unit,
+    onProfileChange: (ConnectionProfile) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onTestApi: () -> Unit,
+    onTestMqtt: () -> Unit,
+    onImportMqtt: () -> Unit,
     onAcceptCertificate: (CertificateCandidate) -> Unit,
+    onRejectCertificate: (CertificateCandidate) -> Unit,
+    onResetCertificate: (CertificateTarget) -> Unit,
 ) {
-    var profile by remember(initialProfile.id) { mutableStateOf(initialProfile) }
-    var password by remember(initialProfile.id) { mutableStateOf(initialPassword) }
+    val profile = editor.draft.profile
+    val password = editor.draft.password
     var saveAndConnect by remember { mutableStateOf(true) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
     val errors = profile.validate()
-    LaunchedEffect(initialProfile) { profile = initialProfile }
-    LaunchedEffect(mqttImport.settings) {
-        mqttImport.settings?.let { imported ->
-            profile = profile.copy(
-                mqttEnabled = imported.enabled,
-                mqttHost = imported.host,
-                mqttPort = imported.port,
-                mqttPrefix = imported.prefix,
-                mqttTls = imported.tlsEnabled,
-                mqttUsername = imported.username,
-                mqttCertificateFingerprint = null,
-            )
-            password = imported.password
-        }
+    val requestBack = {
+        if (editor.draft.hasUnsavedChanges) showDiscardDialog = true else onBack()
     }
+    BackHandler(onBack = requestBack)
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Profil konfigurieren") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Zurück") } },
+                navigationIcon = {
+                    IconButton(onClick = requestBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Zurück") }
+                },
                 windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
             )
         },
@@ -331,14 +325,14 @@ fun ProfileEditorScreen(
             SectionTitle("TeddyCloud API", Icons.Rounded.Cloud)
             OutlinedTextField(
                 value = profile.name,
-                onValueChange = { profile = profile.copy(name = it) },
+                onValueChange = { onProfileChange(profile.copy(name = it)) },
                 label = { Text("Profilname") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = profile.apiBaseUrl,
-                onValueChange = { profile = profile.copy(apiBaseUrl = it, apiCertificateFingerprint = null) },
+                onValueChange = { onProfileChange(profile.copy(apiBaseUrl = it)) },
                 label = { Text("TeddyCloud-URL") },
                 supportingText = { Text("z. B. https://192.168.1.100:8443/") },
                 singleLine = true,
@@ -347,60 +341,40 @@ fun ProfileEditorScreen(
             if (profile.apiBaseUrl.startsWith("http://", ignoreCase = true)) {
                 InlineNotice("Die API-Verbindung ist unverschlüsselt.", warning = true)
             }
-            profile.apiCertificateFingerprint?.let { FingerprintLine("API-Pin", it) }
+            profile.apiCertificateFingerprint?.let {
+                FingerprintLine("API-Pin", it) { onResetCertificate(CertificateTarget.API) }
+            }
             TestRow(
                 label = "API testen",
-                state = apiTest,
+                state = editor.apiTest,
                 enabled = profile.apiBaseUrl.isNotBlank(),
-                onClick = { onTestApi(profile.normalized()) },
-                onAcceptCertificate = { candidate ->
-                    profile = profile.copy(apiCertificateFingerprint = candidate.fingerprintSha256)
-                    onAcceptCertificate(candidate)
-                },
+                onClick = onTestApi,
+                onAcceptCertificate = onAcceptCertificate,
+                onRejectCertificate = onRejectCertificate,
             )
-            OutlinedButton(
-                onClick = { onImportMqtt(profile.normalized()) },
-                enabled = apiTest.status == LinkStatus.CONNECTED && mqttImport.status != LinkStatus.CONNECTING,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (mqttImport.status == LinkStatus.CONNECTING) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Rounded.Download, null)
-                }
-                Spacer(Modifier.width(8.dp))
-                Text("MQTT Settings importieren")
-            }
-            mqttImport.message?.let { message ->
-                Text(
-                    message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (mqttImport.status == LinkStatus.ERROR) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
+
+            ConnectionSetupProgress(editor)
 
             HorizontalDivider()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SectionTitle("MQTT Live-Updates", Icons.Rounded.Router, Modifier.weight(1f))
-                Switch(checked = profile.mqttEnabled, onCheckedChange = { profile = profile.copy(mqttEnabled = it) })
+                Switch(checked = profile.mqttEnabled, onCheckedChange = { onProfileChange(profile.copy(mqttEnabled = it)) })
             }
             Text("Optional. Ohne MQTT verwendet TeddyRemote adaptives API-Polling.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (profile.mqttEnabled) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
                         value = profile.mqttHost,
-                        onValueChange = { profile = profile.copy(mqttHost = it, mqttCertificateFingerprint = null) },
+                        onValueChange = { onProfileChange(profile.copy(mqttHost = it)) },
                         label = { Text("Brokerhost") },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
                     OutlinedTextField(
                         value = profile.mqttPort.toString(),
-                        onValueChange = { profile = profile.copy(mqttPort = it.toIntOrNull() ?: profile.mqttPort) },
+                        onValueChange = { value ->
+                            value.toIntOrNull()?.let { onProfileChange(profile.copy(mqttPort = it)) }
+                        },
                         label = { Text("Port") },
                         singleLine = true,
                         modifier = Modifier.width(110.dp),
@@ -408,64 +382,82 @@ fun ProfileEditorScreen(
                 }
                 OutlinedTextField(
                     value = profile.mqttPrefix,
-                    onValueChange = { profile = profile.copy(mqttPrefix = it) },
+                    onValueChange = { onProfileChange(profile.copy(mqttPrefix = it)) },
                     label = { Text("Themenpräfix") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = profile.mqttUsername,
-                    onValueChange = { profile = profile.copy(mqttUsername = it) },
+                    onValueChange = { onProfileChange(profile.copy(mqttUsername = it)) },
                     label = { Text("Benutzername (optional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = password,
-                    onValueChange = { password = it },
+                    onValueChange = onPasswordChange,
                     label = { Text("Passwort (optional)") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 LabeledSwitch("TLS aktivieren", profile.mqttTls) {
-                    profile = profile.copy(mqttTls = it, mqttCertificateFingerprint = null)
+                    onProfileChange(profile.copy(mqttTls = it))
                 }
-                profile.mqttCertificateFingerprint?.let { FingerprintLine("MQTT-Pin", it) }
+                profile.mqttCertificateFingerprint?.let {
+                    FingerprintLine("MQTT-Pin", it) { onResetCertificate(CertificateTarget.MQTT) }
+                }
                 Text("Client-ID: ${profile.mqttClientId}", style = MaterialTheme.typography.labelSmall)
+                OutlinedButton(
+                    onClick = onImportMqtt,
+                    enabled = editor.apiTest.status == LinkStatus.CONNECTED &&
+                        !editor.apiTest.isStale &&
+                        editor.mqttImport.status != LinkStatus.CONNECTING,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (editor.mqttImport.status == LinkStatus.CONNECTING) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Rounded.Download, null)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text("MQTT Settings importieren")
+                }
+                editor.mqttImport.message?.let { message ->
+                    StatusMessage(message, editor.mqttImport.status, editor.mqttImport.target)
+                }
                 TestRow(
-                    label = "MQTT testen",
-                    state = mqttTest,
+                    label = "MQTT-Verbindung testen",
+                    state = editor.mqttTest,
                     enabled = profile.mqttHost.isNotBlank(),
-                    onClick = { onTestMqtt(profile.normalized(), password) },
-                    onAcceptCertificate = { candidate ->
-                        profile = profile.copy(mqttCertificateFingerprint = candidate.fingerprintSha256)
-                        onAcceptCertificate(candidate)
-                    },
+                    onClick = onTestMqtt,
+                    onAcceptCertificate = onAcceptCertificate,
+                    onRejectCertificate = onRejectCertificate,
                 )
             }
 
             HorizontalDivider()
             SectionTitle("Verbindungsverhalten", Icons.Rounded.PlayArrow)
             LabeledSwitch("Beim App-Start verbinden", profile.connectOnAppStart) {
-                profile = profile.copy(connectOnAppStart = it)
+                onProfileChange(profile.copy(connectOnAppStart = it))
             }
             LabeledSwitch("Automatisch neu verbinden", profile.autoReconnect) {
-                profile = profile.copy(autoReconnect = it)
+                onProfileChange(profile.copy(autoReconnect = it))
             }
             LabeledSwitch("Bei WLAN-Rückkehr erneut verbinden", profile.reconnectOnWifiReconnect) {
-                profile = profile.copy(reconnectOnWifiReconnect = it)
+                onProfileChange(profile.copy(reconnectOnWifiReconnect = it))
             }
             if (profile.autoReconnect) {
                 NumberField("Maximale Retries (0 = unbegrenzt)", profile.maxRetries, Modifier.fillMaxWidth()) {
-                    profile = profile.copy(maxRetries = it.coerceAtLeast(0))
+                    onProfileChange(profile.copy(maxRetries = it.coerceAtLeast(0)))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     NumberField("Initial (s)", profile.initialRetrySeconds, Modifier.weight(1f)) {
-                        profile = profile.copy(initialRetrySeconds = it)
+                        onProfileChange(profile.copy(initialRetrySeconds = it))
                     }
                     NumberField("Maximum (s)", profile.maxRetrySeconds, Modifier.weight(1f)) {
-                        profile = profile.copy(maxRetrySeconds = it)
+                        onProfileChange(profile.copy(maxRetrySeconds = it))
                     }
                 }
             }
@@ -475,12 +467,26 @@ fun ProfileEditorScreen(
                 Text("Nach dem Speichern verbinden")
             }
             Button(
-                onClick = { onSave(profile.normalized(), password, saveAndConnect) },
+                onClick = { onSave(saveAndConnect) },
                 enabled = errors.isEmpty(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Profil speichern") }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text("Änderungen verwerfen?") },
+            text = { Text("Nicht gespeicherte Profil- und Verbindungsdaten gehen verloren.") },
+            confirmButton = {
+                TextButton(onClick = onBack) { Text("Verwerfen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) { Text("Weiter bearbeiten") }
+            },
+        )
     }
 }
 
@@ -536,30 +542,97 @@ fun DiagnosticsScreen(state: MainUiState, onBack: () -> Unit) {
 }
 
 @Composable
+private fun ConnectionSetupProgress(editor: ProfileEditorUiState) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Verbindungsaufbau", style = MaterialTheme.typography.titleSmall)
+            SetupProgressLine("1", "API", editor.apiTest.status, editor.apiTest.isStale)
+            SetupProgressLine("2", "MQTT-Import", editor.mqttImport.status, editor.mqttImport.isStale)
+            if (editor.draft.profile.mqttEnabled) {
+                SetupProgressLine("3", "MQTT", editor.mqttTest.status, editor.mqttTest.isStale)
+            } else {
+                SetupProgressLine("3", "MQTT", LinkStatus.NOT_CHECKED, false, "optional deaktiviert")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetupProgressLine(
+    number: String,
+    label: String,
+    status: LinkStatus,
+    isStale: Boolean,
+    overrideLabel: String? = null,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(number, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(10.dp))
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            overrideLabel ?: if (isStale) "veraltet" else statusLabel(status),
+            style = MaterialTheme.typography.labelMedium,
+            color = statusColor(if (isStale) LinkStatus.WARNING else status),
+        )
+    }
+}
+
+@Composable
 private fun TestRow(
     label: String,
     state: ProfileTestState,
     enabled: Boolean,
     onClick: () -> Unit,
     onAcceptCertificate: (CertificateCandidate) -> Unit,
+    onRejectCertificate: (CertificateCandidate) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        OutlinedButton(onClick = onClick, enabled = enabled && state.status != LinkStatus.CONNECTING) {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled && state.status != LinkStatus.CONNECTING,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             if (state.status == LinkStatus.CONNECTING) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             else Icon(Icons.Rounded.Security, null)
             Spacer(Modifier.width(8.dp))
             Text(label)
         }
-        state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        state.message?.let { StatusMessage(it, state.status, state.target, state.isStale) }
         state.candidate?.let { candidate ->
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Unbekanntes Zertifikat", style = MaterialTheme.typography.titleSmall)
+                    Text("${candidate.host}:${candidate.port}", style = MaterialTheme.typography.bodySmall)
                     Text(candidate.subject, style = MaterialTheme.typography.bodySmall)
                     Text(candidate.fingerprintSha256, style = MaterialTheme.typography.labelSmall)
-                    Button(onClick = { onAcceptCertificate(candidate) }) { Text("Fingerprint übernehmen") }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { onRejectCertificate(candidate) }) { Text("Ablehnen") }
+                        Button(onClick = { onAcceptCertificate(candidate) }) { Text("Vertrauen") }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StatusMessage(message: String, status: LinkStatus, target: String?, isStale: Boolean = false) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            message,
+            style = MaterialTheme.typography.bodySmall,
+            color = statusColor(if (isStale) LinkStatus.WARNING else status),
+        )
+        target?.let {
+            Text(
+                "Ziel: $it",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -574,12 +647,7 @@ private fun DiagnosticCard(title: String, status: LinkStatus, target: String?, m
                 LinkStatus.ERROR -> Icons.Rounded.Error
                 else -> Icons.Rounded.Info
             }
-            val tint = when (status) {
-                LinkStatus.CONNECTED -> Color(0xFF28A862)
-                LinkStatus.WARNING, LinkStatus.CONNECTING -> Color(0xFFF0A020)
-                LinkStatus.ERROR -> MaterialTheme.colorScheme.error
-                else -> MaterialTheme.colorScheme.outline
-            }
+            val tint = statusColor(status)
             Icon(icon, null, tint = tint)
             Spacer(Modifier.width(12.dp))
             Column {
@@ -620,11 +688,20 @@ private fun NumberField(label: String, value: Int, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun FingerprintLine(label: String, fingerprint: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Rounded.Fingerprint, null, Modifier.size(18.dp))
-        Spacer(Modifier.width(6.dp))
-        Text("$label: $fingerprint", style = MaterialTheme.typography.labelSmall, maxLines = 2)
+private fun FingerprintLine(label: String, fingerprint: String, onReset: (() -> Unit)? = null) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Fingerprint, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("$label: $fingerprint", style = MaterialTheme.typography.labelSmall, maxLines = 2)
+        }
+        onReset?.let {
+            TextButton(onClick = it) {
+                Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Zertifikat erneut prüfen")
+            }
+        }
     }
 }
 
@@ -650,4 +727,12 @@ private fun statusLabel(status: LinkStatus): String = when (status) {
     LinkStatus.WARNING -> "Warnung"
     LinkStatus.ERROR -> "Fehler"
     LinkStatus.DISCONNECTED -> "getrennt"
+}
+
+@Composable
+private fun statusColor(status: LinkStatus): Color = when (status) {
+    LinkStatus.CONNECTED -> Color(0xFF28A862)
+    LinkStatus.WARNING, LinkStatus.CONNECTING -> Color(0xFFF0A020)
+    LinkStatus.ERROR -> MaterialTheme.colorScheme.error
+    else -> MaterialTheme.colorScheme.outline
 }

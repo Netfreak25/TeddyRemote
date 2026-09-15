@@ -9,10 +9,9 @@ import de.teddycloud.teddyremote.model.CertificateCandidate
 import de.teddycloud.teddyremote.model.CertificateTarget
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.ConnectionStatus
-import de.teddycloud.teddyremote.model.LinkStatus
-import de.teddycloud.teddyremote.model.MqttSettingsImport
 import de.teddycloud.teddyremote.model.ProfilesState
 import de.teddycloud.teddyremote.model.ThemeMode
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,28 +22,12 @@ import kotlinx.coroutines.launch
 
 enum class AppScreen { OVERVIEW, HOME, SETTINGS, DIAGNOSTICS, PROFILE_EDITOR }
 
-data class ProfileTestState(
-    val status: LinkStatus = LinkStatus.NOT_CHECKED,
-    val message: String? = null,
-    val candidate: CertificateCandidate? = null,
-)
-
-data class MqttImportState(
-    val status: LinkStatus = LinkStatus.NOT_CHECKED,
-    val message: String? = null,
-    val settings: MqttSettingsImport? = null,
-)
-
 data class MainUiState(
     val profiles: ProfilesState = ProfilesState(),
     val connection: ConnectionStatus = ConnectionStatus(),
     val boxes: List<BoxUiModel> = emptyList(),
     val screen: AppScreen = AppScreen.OVERVIEW,
-    val editingProfile: ConnectionProfile? = null,
-    val editingPassword: String = "",
-    val apiTest: ProfileTestState = ProfileTestState(),
-    val mqttTest: ProfileTestState = ProfileTestState(),
-    val mqttImport: MqttImportState = MqttImportState(),
+    val profileEditor: ProfileEditorUiState? = null,
     val focusedBoxId: String? = null,
     val isRefreshing: Boolean = false,
 ) {
@@ -53,65 +36,76 @@ data class MainUiState(
 
 class MainViewModel(private val container: AppContainer) : ViewModel() {
     private val transient = MutableStateFlow(TransientState())
+    private val profileEditorController = ProfileEditorController(
+        scope = viewModelScope,
+        operations = object : ProfileConnectionOperations {
+            override suspend fun testApi(profile: ConnectionProfile): Result<Unit> = container.repository.testApi(profile)
+
+            override suspend fun importMqttSettings(profile: ConnectionProfile) =
+                container.repository.importMqttSettings(profile)
+
+            override suspend fun testMqtt(profile: ConnectionProfile, password: String): Result<Unit> =
+                container.repository.testMqtt(profile, password)
+
+            override suspend fun inspectCertificate(profile: ConnectionProfile, target: CertificateTarget) =
+                container.repository.inspectCertificate(profile, target)
+        },
+    )
+    private var profileLoadJob: Job? = null
 
     val uiState: StateFlow<MainUiState> = combine(
         container.profilesStore.state,
         container.repository.connection,
         container.repository.boxes,
         transient,
-    ) { profiles, connection, boxes, local ->
+        profileEditorController.state,
+    ) { profiles, connection, boxes, local, editor ->
         MainUiState(
             profiles = profiles,
             connection = connection,
             boxes = boxes,
             screen = local.screen,
-            editingProfile = local.editingProfile,
-            editingPassword = local.editingPassword,
-            apiTest = local.apiTest,
-            mqttTest = local.mqttTest,
-            mqttImport = local.mqttImport,
+            profileEditor = editor,
             focusedBoxId = local.focusedBoxId,
             isRefreshing = local.isRefreshing,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     fun navigate(screen: AppScreen) {
+        if (screen != AppScreen.PROFILE_EDITOR) {
+            profileLoadJob?.cancel()
+            profileLoadJob = null
+            if (transient.value.screen == AppScreen.PROFILE_EDITOR) profileEditorController.close()
+        }
         transient.value = transient.value.copy(screen = screen)
     }
 
     fun editProfile(profile: ConnectionProfile?) {
+        profileLoadJob?.cancel()
         if (profile == null) {
+            profileEditorController.open(ConnectionProfile(), "")
             transient.value = transient.value.copy(
                 screen = AppScreen.PROFILE_EDITOR,
-                editingProfile = ConnectionProfile(),
-                editingPassword = "",
-                apiTest = ProfileTestState(),
-                mqttTest = ProfileTestState(),
-                mqttImport = MqttImportState(),
             )
             return
         }
-        viewModelScope.launch {
-            transient.value = transient.value.copy(
-                screen = AppScreen.PROFILE_EDITOR,
-                editingProfile = profile,
-                editingPassword = container.profilesStore.mqttPassword(profile.id).orEmpty(),
-                apiTest = ProfileTestState(),
-                mqttTest = ProfileTestState(),
-                mqttImport = MqttImportState(),
-            )
+        profileLoadJob = viewModelScope.launch {
+            val password = container.profilesStore.mqttPassword(profile.id).orEmpty()
+            profileEditorController.open(profile, password)
+            transient.value = transient.value.copy(screen = AppScreen.PROFILE_EDITOR)
         }
     }
 
-    fun saveProfile(profile: ConnectionProfile, password: String, connectAfterSave: Boolean) {
+    fun saveProfile(connectAfterSave: Boolean) {
+        val editor = profileEditorController.state.value ?: return
         viewModelScope.launch {
             val wasOnboarding = container.profilesStore.state.first().profiles.isEmpty()
-            val saved = container.profilesStore.saveProfile(profile, password)
+            val saved = container.profilesStore.saveProfile(editor.draft.profile.normalized(), editor.draft.password)
             container.profilesStore.activateProfile(saved.id)
             transient.value = transient.value.copy(
                 screen = if (wasOnboarding) AppScreen.OVERVIEW else AppScreen.SETTINGS,
-                editingProfile = null,
             )
+            profileEditorController.close()
             if (connectAfterSave) container.repository.connect()
         }
     }
@@ -184,88 +178,21 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.profilesStore.setThemeMode(themeMode) }
     }
 
-    fun testApi(profile: ConnectionProfile) {
-        transient.value = transient.value.copy(apiTest = ProfileTestState(LinkStatus.CONNECTING))
-        viewModelScope.launch {
-            val result = container.repository.testApi(profile)
-            if (result.isSuccess) {
-                transient.value = transient.value.copy(apiTest = ProfileTestState(LinkStatus.CONNECTED, "API verbunden"))
-            } else {
-                val candidate = if (profile.normalized().apiBaseUrl.startsWith("https://")) {
-                    runCatching { container.repository.inspectCertificate(profile, CertificateTarget.API) }.getOrNull()
-                } else null
-                transient.value = transient.value.copy(
-                    apiTest = ProfileTestState(
-                        status = if (candidate != null) LinkStatus.WARNING else LinkStatus.ERROR,
-                        message = result.exceptionOrNull()?.message,
-                        candidate = candidate,
-                    ),
-                )
-            }
-        }
-    }
+    fun updateEditingProfile(profile: ConnectionProfile) = profileEditorController.updateProfile(profile)
 
-    fun testMqtt(profile: ConnectionProfile, password: String) {
-        transient.value = transient.value.copy(mqttTest = ProfileTestState(LinkStatus.CONNECTING))
-        viewModelScope.launch {
-            val result = container.repository.testMqtt(profile, password)
-            if (result.isSuccess) {
-                transient.value = transient.value.copy(mqttTest = ProfileTestState(LinkStatus.CONNECTED, "MQTT verbunden"))
-            } else {
-                val candidate = if (profile.mqttTls) {
-                    runCatching { container.repository.inspectCertificate(profile, CertificateTarget.MQTT) }.getOrNull()
-                } else null
-                transient.value = transient.value.copy(
-                    mqttTest = ProfileTestState(
-                        status = if (candidate != null) LinkStatus.WARNING else LinkStatus.ERROR,
-                        message = result.exceptionOrNull()?.message,
-                        candidate = candidate,
-                    ),
-                )
-            }
-        }
-    }
+    fun updateEditingPassword(password: String) = profileEditorController.updatePassword(password)
 
-    fun importMqttSettings(profile: ConnectionProfile) {
-        if (transient.value.mqttImport.status == LinkStatus.CONNECTING) return
-        transient.value = transient.value.copy(
-            mqttImport = MqttImportState(LinkStatus.CONNECTING, "MQTT-Einstellungen werden gelesen …"),
-        )
-        viewModelScope.launch {
-            val result = container.repository.importMqttSettings(profile)
-            transient.value = transient.value.copy(
-                mqttImport = result.fold(
-                    onSuccess = { settings ->
-                        MqttImportState(
-                            status = LinkStatus.CONNECTED,
-                            message = if (settings.enabled) {
-                                "MQTT-Einstellungen aus TeddyCloud übernommen"
-                            } else {
-                                "MQTT-Einstellungen übernommen; MQTT ist in TeddyCloud deaktiviert"
-                            },
-                            settings = settings,
-                        )
-                    },
-                    onFailure = { error ->
-                        MqttImportState(LinkStatus.ERROR, error.message ?: "MQTT-Import fehlgeschlagen")
-                    },
-                ),
-            )
-        }
-    }
+    fun testApi() = profileEditorController.testApi()
 
-    fun acceptTestCertificate(candidate: CertificateCandidate) {
-        val current = transient.value.editingProfile ?: return
-        val updated = when (candidate.target) {
-            CertificateTarget.API -> current.copy(apiCertificateFingerprint = candidate.fingerprintSha256)
-            CertificateTarget.MQTT -> current.copy(mqttCertificateFingerprint = candidate.fingerprintSha256)
-        }
-        transient.value = transient.value.copy(
-            editingProfile = updated,
-            apiTest = if (candidate.target == CertificateTarget.API) ProfileTestState() else transient.value.apiTest,
-            mqttTest = if (candidate.target == CertificateTarget.MQTT) ProfileTestState() else transient.value.mqttTest,
-        )
-    }
+    fun testMqtt() = profileEditorController.testMqtt()
+
+    fun importMqttSettings() = profileEditorController.importMqttSettings()
+
+    fun acceptTestCertificate(candidate: CertificateCandidate) = profileEditorController.acceptCertificate(candidate)
+
+    fun rejectTestCertificate(candidate: CertificateCandidate) = profileEditorController.rejectCertificate(candidate)
+
+    fun resetTestCertificate(target: CertificateTarget) = profileEditorController.resetCertificate(target)
 
     fun confirmConnectionCertificate(candidate: CertificateCandidate) {
         viewModelScope.launch { container.repository.confirmCertificate(candidate) }
@@ -281,11 +208,6 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     private data class TransientState(
         val screen: AppScreen = AppScreen.OVERVIEW,
-        val editingProfile: ConnectionProfile? = null,
-        val editingPassword: String = "",
-        val apiTest: ProfileTestState = ProfileTestState(),
-        val mqttTest: ProfileTestState = ProfileTestState(),
-        val mqttImport: MqttImportState = MqttImportState(),
         val focusedBoxId: String? = null,
         val isRefreshing: Boolean = false,
     )

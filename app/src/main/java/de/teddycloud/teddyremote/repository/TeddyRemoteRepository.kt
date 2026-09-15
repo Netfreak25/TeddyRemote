@@ -166,14 +166,14 @@ class TeddyRemoteRepository(
 
     suspend fun testApi(profile: ConnectionProfile): Result<Unit> = runCatching {
         withWifiAccess(profile) {
-            require(profile.validate().isEmpty()) { profile.validate().joinToString() }
+            require(profile.validateApi().isEmpty()) { profile.validateApi().joinToString() }
             TeddyCloudClient.create(profile.normalized()).getBoxes()
         }
     }
 
     suspend fun importMqttSettings(profile: ConnectionProfile): Result<MqttSettingsImport> = runCatching {
         withWifiAccess(profile) {
-            require(profile.validate().none { it.startsWith("TeddyCloud-URL") }) {
+            require(profile.validateApi().isEmpty()) {
                 "TeddyCloud-URL ist ungültig"
             }
             TeddyCloudClient.create(profile.normalized()).getMqttSettingsForRemote()

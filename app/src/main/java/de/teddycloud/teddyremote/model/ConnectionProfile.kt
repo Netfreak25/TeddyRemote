@@ -48,13 +48,18 @@ data class ConnectionProfile(
         )
     }
 
-    fun validate(): List<String> = buildList {
+    fun validateApi(): List<String> = buildList {
         val profile = normalized()
-        if (profile.name.isBlank()) add("Profilname fehlt")
         val uri = runCatching { URI(profile.apiBaseUrl) }.getOrNull()
         if (uri == null || uri.host.isNullOrBlank() || uri.scheme !in setOf("http", "https")) {
             add("TeddyCloud-URL muss mit http:// oder https:// beginnen")
         }
+    }
+
+    fun validate(): List<String> = buildList {
+        val profile = normalized()
+        if (profile.name.isBlank()) add("Profilname fehlt")
+        addAll(validateApi())
         if (profile.mqttEnabled && profile.mqttHost.isBlank()) add("MQTT-Hostname fehlt")
         if (profile.mqttEnabled && profile.mqttPrefix.isBlank()) add("MQTT-Präfix fehlt")
         if (profile.maxRetrySeconds < profile.initialRetrySeconds) {

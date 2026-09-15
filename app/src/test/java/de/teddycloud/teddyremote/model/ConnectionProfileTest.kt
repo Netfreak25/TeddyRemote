@@ -35,6 +35,18 @@ class ConnectionProfileTest {
     }
 
     @Test
+    fun `API validation is independent from incomplete optional MQTT settings`() {
+        val profile = ConnectionProfile(
+            apiBaseUrl = "https://192.168.1.100:8443/",
+            mqttEnabled = true,
+            mqttHost = "",
+        )
+
+        assertTrue(profile.validateApi().isEmpty())
+        assertTrue(profile.validate().any { it.contains("MQTT-Hostname") })
+    }
+
+    @Test
     fun `ignores retired home ssid fields in stored profiles`() {
         val profile = tolerantProfileJson.decodeFromString<ConnectionProfile>(
             """{"name":"Zuhause","homeSsidPrimary":"Home","homeSsidSecondary":"Workshop"}""",
