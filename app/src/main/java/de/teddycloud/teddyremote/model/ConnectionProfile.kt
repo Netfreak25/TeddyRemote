@@ -99,7 +99,14 @@ data class ProfilesState(
     val activeProfileId: String? = null,
     val connectionRequested: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val resumeOfferTimeoutMinutes: Int = DEFAULT_RESUME_OFFER_TIMEOUT_MINUTES,
 ) {
     val activeProfile: ConnectionProfile?
         get() = profiles.firstOrNull { it.id == activeProfileId }
+
+    companion object {
+        const val DEFAULT_RESUME_OFFER_TIMEOUT_MINUTES = 20
+        const val MIN_RESUME_OFFER_TIMEOUT_MINUTES = 1
+        const val MAX_RESUME_OFFER_TIMEOUT_MINUTES = 120
+    }
 }

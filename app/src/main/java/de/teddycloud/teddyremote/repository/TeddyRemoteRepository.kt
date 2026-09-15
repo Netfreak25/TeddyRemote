@@ -19,6 +19,7 @@ import de.teddycloud.teddyremote.model.LinkStatus
 import de.teddycloud.teddyremote.model.MqttBoxEvent
 import de.teddycloud.teddyremote.model.MqttSettingsImport
 import de.teddycloud.teddyremote.model.PlaybackRuntime
+import de.teddycloud.teddyremote.model.ProfilesState
 import de.teddycloud.teddyremote.model.TonieMetadata
 import de.teddycloud.teddyremote.model.TonieboxDto
 import de.teddycloud.teddyremote.model.VolumeRuntime
@@ -269,6 +270,16 @@ class TeddyRemoteRepository(
 
     suspend fun declineResume(boxId: String) {
         playbackResume.decline(boxId)
+    }
+
+    suspend fun setResumeOfferTimeoutMinutes(timeoutMinutes: Int) {
+        profilesStore.setResumeOfferTimeoutMinutes(timeoutMinutes)
+        observePlaybackHistory()
+    }
+
+    suspend fun setTonieAutoResume(ruid: String, enabled: Boolean) {
+        playbackHistoryStore.setAutoResumeEnabled(ruid, enabled)
+        observePlaybackHistory()
     }
 
     suspend fun setVolume(boxId: String, level: Int) {
@@ -797,7 +808,19 @@ class TeddyRemoteRepository(
 
     private suspend fun observePlaybackHistory() {
         try {
-            playbackResume.observe(activeProfile?.id, _boxes.value)
+            val settings = profilesStore.state.first()
+            val timeoutMinutes = settings.resumeOfferTimeoutMinutes.coerceIn(
+                ProfilesState.MIN_RESUME_OFFER_TIMEOUT_MINUTES,
+                ProfilesState.MAX_RESUME_OFFER_TIMEOUT_MINUTES,
+            )
+            val autoResumeBoxes = playbackResume.observe(
+                profileId = activeProfile?.id,
+                boxes = _boxes.value,
+                policy = PlaybackResumePolicy(
+                    offerTimeoutMs = timeoutMinutes * MILLIS_PER_MINUTE,
+                ),
+            )
+            autoResumeBoxes.forEach { resumePlayback(it) }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
@@ -853,6 +876,7 @@ class TeddyRemoteRepository(
         const val BACKGROUND_PLAYING_POLL_MS = 5_000L
         const val BACKGROUND_IDLE_POLL_MS = 15_000L
         const val PLAYBACK_IDENTITY_SETTLE_MS = 300L
+        const val MILLIS_PER_MINUTE = 60_000L
     }
 }
 

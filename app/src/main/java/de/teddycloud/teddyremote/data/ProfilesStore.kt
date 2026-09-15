@@ -119,5 +119,15 @@ class ProfilesStore(
         dataStore.updateData { it.copy(themeMode = themeMode) }
     }
 
+    suspend fun setResumeOfferTimeoutMinutes(timeoutMinutes: Int) {
+        val boundedTimeout = timeoutMinutes.coerceIn(
+            ProfilesState.MIN_RESUME_OFFER_TIMEOUT_MINUTES,
+            ProfilesState.MAX_RESUME_OFFER_TIMEOUT_MINUTES,
+        )
+        dataStore.updateData {
+            it.copy(resumeOfferTimeoutMinutes = boundedTimeout)
+        }
+    }
+
     suspend fun mqttPassword(profileId: String): String? = secretStore.get(profileId)
 }

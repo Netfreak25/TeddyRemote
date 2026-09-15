@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -62,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,6 +72,7 @@ import de.teddycloud.teddyremote.model.CertificateCandidate
 import de.teddycloud.teddyremote.model.CertificateTarget
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.LinkStatus
+import de.teddycloud.teddyremote.model.ProfilesState
 import de.teddycloud.teddyremote.model.ThemeMode
 import de.teddycloud.teddyremote.model.WifiGateState
 import de.teddycloud.teddyremote.model.userMessage
@@ -109,10 +112,18 @@ fun SettingsScreen(
     onDelete: (String) -> Unit,
     onActivate: (String) -> Unit,
     onTheme: (ThemeMode) -> Unit,
+    onResumeOfferTimeout: (Int) -> Unit,
+    onTonieAutoResume: (String, Boolean) -> Unit,
     onDiagnostics: () -> Unit,
     onOpenMqttGuide: () -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<ConnectionProfile?>(null) }
+    var resumeTimeoutText by remember(state.profiles.resumeOfferTimeoutMinutes) {
+        mutableStateOf(state.profiles.resumeOfferTimeoutMinutes.toString())
+    }
+    val resumeTimeout = resumeTimeoutText.toIntOrNull()
+    val resumeTimeoutValid = resumeTimeout != null &&
+        resumeTimeout in ProfilesState.MIN_RESUME_OFFER_TIMEOUT_MINUTES..ProfilesState.MAX_RESUME_OFFER_TIMEOUT_MINUTES
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Einstellungen") },
@@ -236,6 +247,93 @@ fun SettingsScreen(
                         Icon(Icons.Rounded.Info, null)
                         Spacer(Modifier.width(8.dp))
                         Text("Verbindungsdiagnose")
+                    }
+                }
+            }
+
+            Text("Wiedergabeverlauf", style = MaterialTheme.typography.titleLarge)
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Fortsetzen-Angebot", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "So lange bleibt die bisherige Position geschützt, bevor die aktuelle Wiedergabeposition übernommen wird.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = resumeTimeoutText,
+                        onValueChange = { value ->
+                            if (value.length <= 3 && value.all(Char::isDigit)) {
+                                resumeTimeoutText = value
+                                value.toIntOrNull()
+                                    ?.takeIf {
+                                        it in ProfilesState.MIN_RESUME_OFFER_TIMEOUT_MINUTES..
+                                            ProfilesState.MAX_RESUME_OFFER_TIMEOUT_MINUTES
+                                    }
+                                    ?.let(onResumeOfferTimeout)
+                            }
+                        },
+                        label = { Text("Antwortfrist") },
+                        suffix = { Text("Minuten") },
+                        supportingText = {
+                            Text(
+                                if (resumeTimeoutValid) {
+                                    "1 bis 120 Minuten"
+                                } else {
+                                    "Bitte einen Wert zwischen 1 und 120 eingeben"
+                                },
+                            )
+                        },
+                        isError = !resumeTimeoutValid,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    HorizontalDivider()
+                    Text("Auto-Resume pro Tonie", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Die Einstellung gilt anhand der RUID auch nach einem Content- oder Versionswechsel.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (state.knownTonies.isEmpty()) {
+                        Text(
+                            "Noch keine Tonies mit Wiedergabeverlauf erkannt.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        state.knownTonies.sortedByDescending { it.updatedAtEpochMs }.forEachIndexed { index, tonie ->
+                            if (index > 0) HorizontalDivider()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        tonie.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        tonie.ruid,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Switch(
+                                    checked = tonie.autoResumeEnabled,
+                                    onCheckedChange = { enabled -> onTonieAutoResume(tonie.ruid, enabled) },
+                                )
+                            }
+                        }
                     }
                 }
             }

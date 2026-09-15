@@ -9,6 +9,7 @@ import de.teddycloud.teddyremote.model.CertificateCandidate
 import de.teddycloud.teddyremote.model.CertificateTarget
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.ConnectionStatus
+import de.teddycloud.teddyremote.model.PlaybackToniePreference
 import de.teddycloud.teddyremote.model.ProfilesState
 import de.teddycloud.teddyremote.model.ThemeMode
 import kotlinx.coroutines.Job
@@ -30,6 +31,7 @@ data class MainUiState(
     val profileEditor: ProfileEditorUiState? = null,
     val focusedBoxId: String? = null,
     val isRefreshing: Boolean = false,
+    val knownTonies: List<PlaybackToniePreference> = emptyList(),
 ) {
     val needsOnboarding: Boolean get() = profiles.profiles.isEmpty()
 }
@@ -53,21 +55,27 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     )
     private var profileLoadJob: Job? = null
 
-    val uiState: StateFlow<MainUiState> = combine(
+    private val persistedSettings = combine(
         container.profilesStore.state,
+        container.playbackHistoryStore.state,
+    ) { profiles, playbackHistory -> profiles to playbackHistory.knownTonies }
+
+    val uiState: StateFlow<MainUiState> = combine(
+        persistedSettings,
         container.repository.connection,
         container.repository.boxes,
         transient,
         profileEditorController.state,
-    ) { profiles, connection, boxes, local, editor ->
+    ) { persisted, connection, boxes, local, editor ->
         MainUiState(
-            profiles = profiles,
+            profiles = persisted.first,
             connection = connection,
             boxes = boxes,
             screen = local.screen,
             profileEditor = editor,
             focusedBoxId = local.focusedBoxId,
             isRefreshing = local.isRefreshing,
+            knownTonies = persisted.second,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
@@ -188,6 +196,14 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setTheme(themeMode: ThemeMode) {
         viewModelScope.launch { container.profilesStore.setThemeMode(themeMode) }
+    }
+
+    fun setResumeOfferTimeoutMinutes(timeoutMinutes: Int) {
+        viewModelScope.launch { container.repository.setResumeOfferTimeoutMinutes(timeoutMinutes) }
+    }
+
+    fun setTonieAutoResume(ruid: String, enabled: Boolean) {
+        viewModelScope.launch { container.repository.setTonieAutoResume(ruid, enabled) }
     }
 
     fun updateEditingProfile(profile: ConnectionProfile) = profileEditorController.updateProfile(profile)

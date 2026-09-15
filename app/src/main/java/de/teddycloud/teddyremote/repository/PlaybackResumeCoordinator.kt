@@ -23,6 +23,19 @@ internal data class ResumeTarget(
     val positionMs: Long,
 )
 
+internal data class PlaybackResumePolicy(
+    val offerTimeoutMs: Long = DEFAULT_OFFER_TIMEOUT_MS,
+) {
+    init {
+        require(offerTimeoutMs > 0L) { "Resume offer timeout must be positive" }
+    }
+
+    companion object {
+        const val DEFAULT_OFFER_TIMEOUT_MS = 20L * 60L * 1_000L
+        val DEFAULT = PlaybackResumePolicy()
+    }
+}
+
 /** Owns playback bookmarks and the temporary state of resume prompts. */
 internal class PlaybackResumeCoordinator(
     scope: CoroutineScope,
@@ -47,8 +60,11 @@ internal class PlaybackResumeCoordinator(
         }
     }
 
-    suspend fun observe(profileId: String?, boxes: List<BoxUiModel>) {
-        mutex.withLock {
+    suspend fun observe(
+        profileId: String?,
+        boxes: List<BoxUiModel>,
+        policy: PlaybackResumePolicy = PlaybackResumePolicy.DEFAULT,
+    ): List<String> = mutex.withLock {
             if (activeProfileId != profileId) {
                 sessions.clear()
                 latestBoxes = emptyMap()
@@ -56,15 +72,25 @@ internal class PlaybackResumeCoordinator(
             }
             if (profileId == null) {
                 publishOffersLocked()
-                return
+                return@withLock emptyList()
             }
 
             latestBoxes = boxes.associateBy { it.box.id.uppercase() }
             sessions.keys.retainAll(latestBoxes.keys)
-            boxes.forEach { processModelLocked(profileId, it, nowEpochMillis()) }
+            boxes.forEach { processModelLocked(profileId, it, nowEpochMillis(), policy) }
             publishOffersLocked()
+            val autoResumeBoxes = mutableListOf<String>()
+            sessions.forEach { (boxId, session) ->
+                val offer = session.offer ?: return@forEach
+                if (offer.autoResumeRequested || offer.pendingSinceEpochMs != null || offer.error != null) {
+                    return@forEach
+                }
+                if (!storage.isAutoResumeEnabled(session.key.ruid)) return@forEach
+                session.offer = offer.copy(autoResumeRequested = true)
+                autoResumeBoxes += boxId
+            }
+            autoResumeBoxes
         }
-    }
 
     suspend fun reset() {
         mutex.withLock {
@@ -141,7 +167,12 @@ internal class PlaybackResumeCoordinator(
         }
     }
 
-    private suspend fun processModelLocked(profileId: String, model: BoxUiModel, now: Long) {
+    private suspend fun processModelLocked(
+        profileId: String,
+        model: BoxUiModel,
+        now: Long,
+        policy: PlaybackResumePolicy,
+    ) {
         val boxId = model.box.id.uppercase()
         val existing = sessions[boxId]
         if (!model.box.runtime.online) {
@@ -161,7 +192,7 @@ internal class PlaybackResumeCoordinator(
             val session = PlaybackSession(key = key, lastStatus = model.box.runtime.playback.status)
             sessions[boxId] = session
             updatePositionLocked(session, model, now)
-            if (model.box.runtime.playback.isPlaying) startPlaybackLocked(session, now)
+            if (model.box.runtime.playback.isPlaying) startPlaybackLocked(session, now, policy.offerTimeoutMs)
             return
         }
 
@@ -171,7 +202,7 @@ internal class PlaybackResumeCoordinator(
         val status = model.box.runtime.playback.status
         when {
             status.equals(STATUS_PLAYING, ignoreCase = true) && !existing.hasPlayed -> {
-                startPlaybackLocked(existing, now)
+                startPlaybackLocked(existing, now, policy.offerTimeoutMs)
             }
             status.equals(STATUS_PLAYING, ignoreCase = true) && previousStatus.equals(STATUS_PAUSED, ignoreCase = true) -> {
                 saveCurrentLocked(existing, now)
@@ -191,7 +222,7 @@ internal class PlaybackResumeCoordinator(
         existing.lastStatus = status
     }
 
-    private suspend fun startPlaybackLocked(session: PlaybackSession, now: Long) {
+    private suspend fun startPlaybackLocked(session: PlaybackSession, now: Long, offerTimeoutMs: Long) {
         session.hasPlayed = true
         session.lastSavedAtEpochMs = now
         if (session.offer != null) {
@@ -199,11 +230,12 @@ internal class PlaybackResumeCoordinator(
             return
         }
         val current = session.lastPosition ?: return
+        storage.rememberTonie(session.key.ruid, current.contentTitle, now)
         val bookmark = storage.find(session.key)
         if (bookmark != null && bookmark.isWorthOffering() && current.differsMeaningfullyFrom(bookmark)) {
             session.offer = PendingResumeOffer(
                 bookmark = bookmark,
-                expiresAtEpochMs = now + OFFER_TIMEOUT_MS,
+                expiresAtEpochMs = now + offerTimeoutMs,
             )
             return
         }
@@ -300,6 +332,7 @@ internal class PlaybackResumeCoordinator(
         val expiresAtEpochMs: Long,
         val pendingSinceEpochMs: Long? = null,
         val error: String? = null,
+        val autoResumeRequested: Boolean = false,
     )
 
     private data class ObservedPosition(
@@ -337,7 +370,6 @@ internal class PlaybackResumeCoordinator(
         const val STATUS_PAUSED = "paused"
         const val STATUS_STOPPED = "stopped"
         const val SAVE_INTERVAL_MS = 60_000L
-        const val OFFER_TIMEOUT_MS = 20L * 60L * 1_000L
         const val RESUME_DIFFERENCE_MS = 30_000L
         const val MIN_RESUME_POSITION_MS = 30_000L
         const val SEEK_CONFIRM_TOLERANCE_MS = 15_000L

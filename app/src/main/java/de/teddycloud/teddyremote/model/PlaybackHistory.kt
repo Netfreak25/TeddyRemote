@@ -23,6 +23,15 @@ data class PlaybackBookmark(
 data class PlaybackHistoryState(
     val schemaVersion: Int = 1,
     val bookmarks: List<PlaybackBookmark> = emptyList(),
+    val knownTonies: List<PlaybackToniePreference> = emptyList(),
+)
+
+@Serializable
+data class PlaybackToniePreference(
+    val ruid: String,
+    val title: String,
+    val autoResumeEnabled: Boolean = false,
+    val updatedAtEpochMs: Long,
 )
 
 data class ResumeOffer(

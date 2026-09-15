@@ -92,6 +92,8 @@ fun TeddyRemoteApp(
                         onDelete = viewModel::deleteProfile,
                         onActivate = viewModel::activateProfile,
                         onTheme = viewModel::setTheme,
+                        onResumeOfferTimeout = viewModel::setResumeOfferTimeoutMinutes,
+                        onTonieAutoResume = viewModel::setTonieAutoResume,
                         onDiagnostics = { viewModel.navigate(AppScreen.DIAGNOSTICS) },
                         onOpenMqttGuide = { openMqttGuide(context) },
                     )

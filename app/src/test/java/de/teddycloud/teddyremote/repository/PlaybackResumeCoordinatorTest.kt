@@ -23,6 +23,18 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlaybackResumeCoordinatorTest {
     @Test
+    fun `first observed position is stored immediately without a temporary offer`() = runTest {
+        val storage = FakePlaybackStorage()
+        val coordinator = coordinator(storage)
+
+        coordinator.observe(PROFILE, listOf(model(positionMs = 45_000L)))
+
+        assertEquals(45_000L, storage.bookmarks.getValue(KEY).positionMs)
+        assertEquals("Testtonie", storage.knownTonies.getValue(RUID))
+        assertNull(coordinator.offers.value[BOX_ID])
+    }
+
+    @Test
     fun `offers a saved position and decline replaces it with the current position`() = runTest {
         val storage = FakePlaybackStorage(bookmark(positionMs = 120_000L))
         val coordinator = coordinator(storage)
@@ -59,6 +71,82 @@ class PlaybackResumeCoordinatorTest {
 
         assertNull(coordinator.offers.value[BOX_ID])
         assertEquals(1_200_000L, storage.bookmarks.getValue(KEY).positionMs)
+    }
+
+    @Test
+    fun `offer timeout follows the configured duration`() = runTest {
+        val storage = FakePlaybackStorage(bookmark(positionMs = 180_000L))
+        val coordinator = coordinator(storage)
+        coordinator.observe(
+            PROFILE,
+            listOf(model(positionMs = 0L, durationMs = 3_600_000L)),
+            PlaybackResumePolicy(offerTimeoutMs = 60_000L),
+        )
+
+        advanceTimeBy(61_000L)
+        runCurrent()
+
+        assertNull(coordinator.offers.value[BOX_ID])
+        assertEquals(60_000L, storage.bookmarks.getValue(KEY).positionMs)
+    }
+
+    @Test
+    fun `auto resume is requested once only for the enabled ruid`() = runTest {
+        val storage = FakePlaybackStorage(bookmark(positionMs = 120_000L)).apply {
+            autoResumeRuids += RUID
+        }
+        val coordinator = coordinator(storage)
+
+        val first = coordinator.observe(PROFILE, listOf(model(positionMs = 10_000L)))
+        val second = coordinator.observe(PROFILE, listOf(model(positionMs = 11_000L)))
+
+        assertEquals(listOf(BOX_ID), first)
+        assertTrue(second.isEmpty())
+        assertNotNull(coordinator.offers.value[BOX_ID])
+    }
+
+    @Test
+    fun `auto resume preference applies across content versions but not to another ruid`() = runTest {
+        val nextVersionKey = PlaybackBookmarkKey(PROFILE, RUID, VERSION + 1)
+        val otherRuidKey = PlaybackBookmarkKey(PROFILE, OTHER_RUID, VERSION)
+        val storage = FakePlaybackStorage(
+            bookmark(key = nextVersionKey, positionMs = 120_000L),
+            bookmark(key = otherRuidKey, positionMs = 120_000L),
+        ).apply {
+            autoResumeRuids += RUID
+        }
+
+        val versionCoordinator = coordinator(storage)
+        val versionRequests = versionCoordinator.observe(
+            PROFILE,
+            listOf(model(version = VERSION + 1, positionMs = 10_000L)),
+        )
+        assertEquals(listOf(BOX_ID), versionRequests)
+
+        versionCoordinator.reset()
+        val otherRequests = versionCoordinator.observe(
+            PROFILE,
+            listOf(model(ruid = OTHER_RUID, positionMs = 10_000L)),
+        )
+        assertTrue(otherRequests.isEmpty())
+        assertNotNull(versionCoordinator.offers.value[BOX_ID])
+    }
+
+    @Test
+    fun `failed automatic resume remains manual and is not retried`() = runTest {
+        val storage = FakePlaybackStorage(bookmark(positionMs = 120_000L)).apply {
+            autoResumeRuids += RUID
+        }
+        val coordinator = coordinator(storage)
+        assertEquals(listOf(BOX_ID), coordinator.observe(PROFILE, listOf(model(positionMs = 10_000L))))
+
+        coordinator.beginResume(BOX_ID)
+        coordinator.resumeFailed(BOX_ID, "Seek fehlgeschlagen")
+        val retryRequests = coordinator.observe(PROFILE, listOf(model(positionMs = 11_000L)))
+
+        assertTrue(retryRequests.isEmpty())
+        assertEquals("Seek fehlgeschlagen", coordinator.offers.value.getValue(BOX_ID).error)
+        assertFalse(coordinator.offers.value.getValue(BOX_ID).pending)
     }
 
     @Test
@@ -182,10 +270,11 @@ class PlaybackResumeCoordinatorTest {
     }
 
     private fun bookmark(
+        key: PlaybackBookmarkKey = KEY,
         chapter: Int = 0,
         positionMs: Long,
     ) = PlaybackBookmark(
-        key = KEY,
+        key = key,
         chapter = chapter,
         positionMs = positionMs,
         contentTitle = "Testtonie",
@@ -195,6 +284,8 @@ class PlaybackResumeCoordinatorTest {
 
     private class FakePlaybackStorage(vararg initial: PlaybackBookmark) : PlaybackBookmarkStorage {
         val bookmarks = initial.associateByTo(mutableMapOf()) { it.key }
+        val knownTonies = mutableMapOf<String, String>()
+        val autoResumeRuids = mutableSetOf<String>()
 
         override suspend fun find(key: PlaybackBookmarkKey): PlaybackBookmark? = bookmarks[key]
 
@@ -205,6 +296,12 @@ class PlaybackResumeCoordinatorTest {
         override suspend fun delete(key: PlaybackBookmarkKey) {
             bookmarks.remove(key)
         }
+
+        override suspend fun rememberTonie(ruid: String, title: String, updatedAtEpochMs: Long) {
+            knownTonies[ruid.uppercase()] = title
+        }
+
+        override suspend fun isAutoResumeEnabled(ruid: String): Boolean = ruid.uppercase() in autoResumeRuids
     }
 
     private companion object {
