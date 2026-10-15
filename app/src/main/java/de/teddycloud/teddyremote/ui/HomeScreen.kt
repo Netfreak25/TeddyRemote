@@ -3,6 +3,7 @@ package de.teddycloud.teddyremote.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -70,6 +71,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,7 +108,9 @@ import kotlin.math.roundToLong
 fun HomeScreen(
     state: MainUiState,
     onRefresh: () -> Unit,
-    onOpenOverview: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
     onPlayback: (String, String) -> Unit,
     onSeek: (String, Int, Long) -> Unit,
     onResumePlayback: (String) -> Unit,
@@ -123,7 +127,7 @@ fun HomeScreen(
         TopAppBar(
             title = {
                 Column {
-                    Text("TeddyRemote")
+                    Text("Übersicht")
                     Text(
                         state.connection.profileName ?: "Keine TeddyCloud",
                         style = MaterialTheme.typography.labelMedium,
@@ -132,11 +136,7 @@ fun HomeScreen(
                 }
             },
             actions = {
-                ConnectionBadge(state.connection.apiStatus, "API")
-                if (state.profiles.activeProfile?.mqttEnabled == true) {
-                    Spacer(Modifier.width(6.dp))
-                    ConnectionBadge(state.connection.mqttStatus, "MQTT")
-                }
+                ConnectionAction(state, onConnect, onDisconnect)
             },
             windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         )
@@ -145,20 +145,20 @@ fun HomeScreen(
             state.profiles.activeProfile != null && state.connection.wifiGate != WifiGateState.AVAILABLE -> ConnectionEmptyState(
                 title = if (state.connection.desiredConnected) "Verbindung pausiert" else "WLAN nicht verfügbar",
                 detail = state.connection.wifiGate.userMessage,
-                action = "Zur Übersicht",
-                onAction = onOpenOverview,
+                action = "Einstellungen",
+                onAction = onOpenSettings,
             )
             !state.connection.desiredConnected -> ConnectionEmptyState(
                 title = "Nicht verbunden",
                 detail = "Wähle ein Profil und verbinde dich mit deiner TeddyCloud.",
-                action = "Zur Übersicht",
-                onAction = onOpenOverview,
+                action = "Einstellungen",
+                onAction = onOpenSettings,
             )
             !state.connection.isApiUsable -> ConnectionEmptyState(
                 title = "TeddyCloud nicht erreichbar",
                 detail = state.connection.message ?: "Verbindung wird hergestellt …",
-                action = "Zur Übersicht",
-                onAction = onOpenOverview,
+                action = "Einstellungen",
+                onAction = onOpenSettings,
             )
             else -> PullToRefreshBox(
                 isRefreshing = state.isRefreshing,
@@ -180,9 +180,10 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        items(state.boxes, key = { it.box.id }) { model ->
+                        items(state.boxes, key = { "${state.profiles.activeProfileId}:${it.box.id}" }) { model ->
                             TonieboxCard(
                                 model = model,
+                                showTonieId = state.profiles.showTonieId,
                                 highlighted = state.focusedBoxId?.equals(model.box.id, ignoreCase = true) == true,
                                 onPlayback = { action -> onPlayback(model.box.id, action) },
                                 onSeek = { chapter, positionMs -> onSeek(model.box.id, chapter, positionMs) },
@@ -205,8 +206,9 @@ fun HomeScreen(
 }
 
 @Composable
-private fun TonieboxCard(
+internal fun TonieboxCard(
     model: BoxUiModel,
+    showTonieId: Boolean,
     highlighted: Boolean,
     onPlayback: (String) -> Unit,
     onSeek: (Int, Long) -> Unit,
@@ -225,6 +227,7 @@ private fun TonieboxCard(
     var bedtimeDialogVisible by remember(model.box.id) { mutableStateOf(false) }
     var sleepDialogVisible by remember(model.box.id) { mutableStateOf(false) }
     val runtime = model.box.runtime
+    var expanded by rememberSaveable(model.box.id, runtime.online) { mutableStateOf(runtime.online) }
     val confirmedVolume = model.desiredVolume ?: runtime.volume.level ?: BoxVolume.MIN_LEVEL
     val currentChapter = runtime.playback.chapter
     val fallbackDurationSeconds = model.metadata?.playlist
@@ -272,293 +275,304 @@ private fun TonieboxCard(
     val remoteControlVisible = isRemoteControlVisible(runtime.online, runtime.lastConnection)
     val bedtimeRemaining = rememberBedtimeRemaining(runtime.bedtime)
     Card(
-        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        modifier = Modifier.fillMaxWidth().animateContentSize().clickable(
+            onClickLabel = if (expanded) "Box einklappen" else "Box ausklappen",
+        ) { expanded = !expanded },
         colors = CardDefaults.cardColors(),
         border = if (highlighted) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
         elevation = CardDefaults.cardElevation(defaultElevation = if (highlighted) 8.dp else 2.dp),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(if (model.boxImageUrl == null) 76.dp else 292.dp)
-                    .clip(RoundedCornerShape(20.dp)),
-            ) {
-                model.boxImageUrl?.let { image ->
-                    AsyncImage(
-                        model = image,
-                        contentDescription = model.box.boxName,
-                        modifier = Modifier.fillMaxSize().padding(top = 2.dp),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().align(Alignment.TopStart).padding(horizontal = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+            if (!expanded) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AsyncImage(model.boxImageUrl, model.displayName, Modifier.size(48.dp), contentScale = ContentScale.Fit)
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            model.box.boxName.ifBlank { model.box.commonName.ifBlank { model.box.id } },
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        Text(model.displayName, style = MaterialTheme.typography.titleMedium)
                         Text(
                             if (runtime.online) "Online" else "Zuletzt ${relativeLastSeen(runtime.lastConnection)}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (runtime.online) Color(0xFF16834B) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Box(
-                        Modifier.size(12.dp).clip(RoundedCornerShape(50)).background(
-                            if (runtime.online) Color(0xFF28A862) else MaterialTheme.colorScheme.outlineVariant,
-                        ),
-                    )
-                    if (remoteControlVisible) {
-                        IconButton(onClick = { deviceExpanded = !deviceExpanded }) {
-                            Icon(Icons.Rounded.MoreVert, "Geräteoptionen")
-                        }
-                    }
-                }
-            }
-
-            if (remoteControlVisible) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AsyncImage(
-                        model = model.metadata?.pictureUrl,
-                        contentDescription = model.metadata?.title,
-                        modifier = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            model.metadata?.title ?: runtime.playback.tonie ?: "Kein Tonie",
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            currentTrackTitle(model),
-                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                         )
-                        runtime.playback.ruid?.let {
-                            Text(it.uppercase(), style = MaterialTheme.typography.labelSmall)
-                        }
                     }
-                    VolumeControlButton(
-                        volume = confirmedVolume,
-                        enabled = runtime.controls.volume && model.pendingCommand == null,
-                        onVolume = onVolume,
-                    )
+                    Icon(Icons.Rounded.ExpandMore, "Box ausklappen")
                 }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                runtime.battery.percent?.let {
-                    StatusChip(Icons.Rounded.BatteryChargingFull, "$it %")
-                }
-                if ((runtime.headphones.connectedCount ?: 0) > 0) {
-                    StatusChip(Icons.Rounded.Headphones, "${runtime.headphones.connectedCount} verbunden")
-                }
-                if (runtime.bedtime.isActive) {
-                    StatusChip(
-                        Icons.Rounded.Bedtime,
-                        bedtimeRemaining?.let { "Bedtime ${formatCountdown(it)}" } ?: "Bedtime aktiv",
-                    )
-                }
-            }
-
-            if (remoteControlVisible) {
-                if (runtime.controls.bedtime || runtime.controls.sleep || runtime.bedtime.isActive) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = { bedtimeDialogVisible = true },
-                            enabled = runtime.controls.bedtime && model.pendingCommand == null,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Rounded.Bedtime, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (runtime.bedtime.isActive) "Bedtime" else "Bedtime starten")
-                        }
-                        OutlinedButton(
-                            onClick = { sleepDialogVisible = true },
-                            enabled = runtime.controls.sleep && model.pendingCommand == null,
-                        ) {
-                            Icon(Icons.Rounded.PowerSettingsNew, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Schlafen")
-                        }
-                    }
-                }
-
-                val playbackEnabled = runtime.controls.playback && model.pendingCommand == null
-                val seekEnabled = playbackEnabled && displayedProgress != null && displayedProgress.durationMs > 1L
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (model.boxImageUrl == null) 76.dp else 292.dp)
+                        .clip(RoundedCornerShape(20.dp)),
                 ) {
-                    IconButton(
-                        enabled = playbackEnabled,
-                        onClick = { onPlayback("prev") },
-                    ) { Icon(Icons.Rounded.SkipPrevious, "Vorheriges Kapitel") }
-                    IconButton(
-                        enabled = seekEnabled,
-                        onClick = {
-                            displayedProgress?.let {
-                                submitSeek(PlaybackProgress.shifted(it, -SEEK_STEP_MS))
-                            }
-                        },
-                    ) { Icon(Icons.Rounded.Replay30, "30 Sekunden zurück") }
-                    FilledIconButton(
-                        enabled = playbackEnabled,
-                        onClick = { onPlayback(if (runtime.playback.isPlaying) "pause" else "start") },
-                        modifier = Modifier.size(64.dp),
+                    model.boxImageUrl?.let { image ->
+                        AsyncImage(
+                            model = image,
+                            contentDescription = model.box.boxName,
+                            modifier = Modifier.fillMaxSize().padding(top = 2.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().align(Alignment.TopStart).padding(horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (model.pendingCommand?.startsWith("playback") == true) {
-                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                if (runtime.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                "Play/Pause",
-                                Modifier.size(32.dp),
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                model.box.boxName.ifBlank { model.box.commonName.ifBlank { model.box.id } },
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                if (runtime.online) "Online" else "Zuletzt ${relativeLastSeen(runtime.lastConnection)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (runtime.online) Color(0xFF16834B) else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                    }
-                    IconButton(
-                        enabled = seekEnabled,
-                        onClick = {
-                            displayedProgress?.let {
-                                submitSeek(PlaybackProgress.shifted(it, SEEK_STEP_MS))
+                        Box(
+                            Modifier.size(12.dp).clip(RoundedCornerShape(50)).background(
+                                if (runtime.online) Color(0xFF28A862) else MaterialTheme.colorScheme.outlineVariant,
+                            ),
+                        )
+                        if (remoteControlVisible) {
+                            IconButton(onClick = { deviceExpanded = !deviceExpanded }) {
+                                Icon(Icons.Rounded.MoreVert, "Geräteoptionen")
                             }
-                        },
-                    ) { Icon(Icons.Rounded.Forward30, "30 Sekunden vor") }
-                    IconButton(
-                        enabled = playbackEnabled,
-                        onClick = { onPlayback("next") },
-                    ) { Icon(Icons.Rounded.SkipNext, "Nächstes Kapitel") }
-                }
-
-                Slider(
-                    value = displayedProgress?.positionMs?.toFloat() ?: 0f,
-                    onValueChange = { draggedSeekMs = it.roundToLong() },
-                    onValueChangeFinished = {
-                        draggedSeekMs?.let(::submitSeek)
-                    },
-                    enabled = seekEnabled,
-                    valueRange = 0f..(displayedProgress?.lastSeekableMs?.toFloat() ?: 1f),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(Modifier.fillMaxWidth()) {
-                    Text(
-                        displayedProgress?.positionMs?.let(PlaybackProgress::formatTime) ?: "--:--",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        displayedProgress?.remainingMs?.let { "−${PlaybackProgress.formatTime(it)}" } ?: "−--:--",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
-
-                model.resumeOffer?.let { offer ->
-                    ResumePlaybackOffer(
-                        offer = offer,
-                        enabled = playbackEnabled && !offer.pending,
-                        onResume = onResumePlayback,
-                        onDecline = onDeclineResume,
-                    )
-                }
-
-            model.commandError?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-
-            val playlist = model.metadata?.playlist.orEmpty()
-            val playlistCanLoad = runtime.playback.ruid?.matches(RUID_PATTERN) == true
-            OutlinedButton(
-                onClick = {
-                    if (playlist.isEmpty()) {
-                        playlistExpanded = true
-                        onRefreshPlaylist()
-                    } else {
-                        playlistExpanded = !playlistExpanded
+                        }
                     }
-                },
-                enabled = playlist.isNotEmpty() || playlistCanLoad,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.QueueMusic, null)
-                Spacer(Modifier.width(8.dp))
-                Text(if (playlist.isEmpty()) "Kapitelinformationen laden" else "Playlist (${playlist.size})")
-                Spacer(Modifier.weight(1f))
-                Icon(if (playlistExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null)
-            }
-            AnimatedVisibility(playlistExpanded) {
-                if (playlist.isEmpty()) {
-                    Text(
-                        "Noch keine Kapitelinformationen verfügbar. Tippe zum erneuten Laden noch einmal auf die Schaltfläche.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    )
-                } else {
-                    Column {
-                        playlist.forEach { track ->
-                            val selected = runtime.playback.chapter == track.index
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                                    )
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                }
+
+                if (remoteControlVisible) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(
+                            model = model.metadata?.pictureUrl,
+                            contentDescription = model.metadata?.title,
+                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                model.metadata?.title ?: runtime.playback.tonie ?: "Kein Tonie",
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                currentTrackTitle(model),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            runtime.playback.ruid?.takeIf { showTonieId }?.let {
+                                Text(it.uppercase(), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        VolumeControlButton(
+                            volume = confirmedVolume,
+                            enabled = runtime.controls.volume && model.pendingCommand == null,
+                            onVolume = onVolume,
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    runtime.battery.percent?.let {
+                        StatusChip(Icons.Rounded.BatteryChargingFull, "$it %")
+                    }
+                    if ((runtime.headphones.connectedCount ?: 0) > 0) {
+                        StatusChip(Icons.Rounded.Headphones, "${runtime.headphones.connectedCount} verbunden")
+                    }
+                    if (runtime.bedtime.isActive) {
+                        StatusChip(
+                            Icons.Rounded.Bedtime,
+                            bedtimeRemaining?.let { "Bedtime ${formatCountdown(it)}" } ?: "Bedtime aktiv",
+                        )
+                    }
+                }
+
+                if (remoteControlVisible) {
+                    if (runtime.controls.bedtime || runtime.controls.sleep || runtime.bedtime.isActive) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { bedtimeDialogVisible = true },
+                                enabled = runtime.controls.bedtime && model.pendingCommand == null,
+                                modifier = Modifier.weight(1f),
                             ) {
-                                Text("${track.index + 1}.", modifier = Modifier.width(28.dp))
-                                Text(track.title, modifier = Modifier.weight(1f), maxLines = 2)
-                                track.durationSeconds?.let {
-                                    Text(formatDuration(it), style = MaterialTheme.typography.labelSmall)
-                                }
-                                IconButton(
-                                    enabled = runtime.controls.playback,
-                                    onClick = { onSeek(track.index, 0L) },
-                                ) { Icon(Icons.Rounded.PlayArrow, "Kapitel abspielen") }
+                                Icon(Icons.Rounded.Bedtime, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (runtime.bedtime.isActive) "Bedtime" else "Bedtime starten")
+                            }
+                            OutlinedButton(
+                                onClick = { sleepDialogVisible = true },
+                                enabled = runtime.controls.sleep && model.pendingCommand == null,
+                            ) {
+                                Icon(Icons.Rounded.PowerSettingsNew, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Schlafen")
                             }
                         }
                     }
-                }
-            }
 
-                AnimatedVisibility(deviceExpanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        HorizontalDivider()
-                        Text("Gerät", style = MaterialTheme.typography.titleSmall)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Brightness6, null)
-                            Slider(
-                                value = brightness,
-                                onValueChange = { brightness = it },
-                                onValueChangeFinished = { onBrightness(brightness.toInt()) },
-                                valueRange = 0f..100f,
-                                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
-                            )
-                            Text("${brightness.toInt()} %")
+                    val playbackEnabled = runtime.controls.playback && model.pendingCommand == null
+                    val seekEnabled = playbackEnabled && displayedProgress != null && displayedProgress.durationMs > 1L
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(
+                            enabled = playbackEnabled,
+                            onClick = { onPlayback("prev") },
+                        ) { Icon(Icons.Rounded.SkipPrevious, "Vorheriges Kapitel") }
+                        IconButton(
+                            enabled = seekEnabled,
+                            onClick = {
+                                displayedProgress?.let {
+                                    submitSeek(PlaybackProgress.shifted(it, -SEEK_STEP_MS))
+                                }
+                            },
+                        ) { Icon(Icons.Rounded.Replay30, "30 Sekunden zurück") }
+                        FilledIconButton(
+                            enabled = playbackEnabled,
+                            onClick = { onPlayback(if (runtime.playback.isPlaying) "pause" else "start") },
+                            modifier = Modifier.size(64.dp),
+                        ) {
+                            if (model.pendingCommand?.startsWith("playback") == true) {
+                                CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(
+                                    if (runtime.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    "Play/Pause",
+                                    Modifier.size(32.dp),
+                                )
+                            }
                         }
-                        OutlinedButton(onClick = onPing, enabled = runtime.controls.ping) {
-                            Icon(Icons.Rounded.Refresh, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Box anpingen")
+                        IconButton(
+                            enabled = seekEnabled,
+                            onClick = {
+                                displayedProgress?.let {
+                                    submitSeek(PlaybackProgress.shifted(it, SEEK_STEP_MS))
+                                }
+                            },
+                        ) { Icon(Icons.Rounded.Forward30, "30 Sekunden vor") }
+                        IconButton(
+                            enabled = playbackEnabled,
+                            onClick = { onPlayback("next") },
+                        ) { Icon(Icons.Rounded.SkipNext, "Nächstes Kapitel") }
+                    }
+
+                    Slider(
+                        value = displayedProgress?.positionMs?.toFloat() ?: 0f,
+                        onValueChange = { draggedSeekMs = it.roundToLong() },
+                        onValueChangeFinished = {
+                            draggedSeekMs?.let(::submitSeek)
+                        },
+                        enabled = seekEnabled,
+                        valueRange = 0f..(displayedProgress?.lastSeekableMs?.toFloat() ?: 1f),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(
+                            displayedProgress?.positionMs?.let(PlaybackProgress::formatTime) ?: "--:--",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            displayedProgress?.remainingMs?.let { "−${PlaybackProgress.formatTime(it)}" } ?: "−--:--",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+
+                    model.resumeOffer?.let { offer ->
+                        ResumePlaybackOffer(
+                            offer = offer,
+                            enabled = playbackEnabled && !offer.pending,
+                            onResume = onResumePlayback,
+                            onDecline = onDeclineResume,
+                        )
+                    }
+
+                    model.commandError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    val playlist = model.metadata?.playlist.orEmpty()
+                    val playlistCanLoad = runtime.playback.ruid?.matches(RUID_PATTERN) == true
+                    OutlinedButton(
+                        onClick = {
+                            playlistExpanded = !playlistExpanded
+                            if (playlistExpanded && model.metadata?.playlistComplete != true) onRefreshPlaylist()
+                        },
+                        enabled = playlist.isNotEmpty() || playlistCanLoad,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.QueueMusic, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (playlist.isEmpty()) "Kapitelinformationen laden" else "Playlist (${playlist.size})")
+                        Spacer(Modifier.weight(1f))
+                        Icon(if (playlistExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null)
+                    }
+                    AnimatedVisibility(playlistExpanded) {
+                        if (playlist.isEmpty()) {
+                            Text(
+                                "Noch keine Kapitelinformationen verfügbar. Tippe zum erneuten Laden noch einmal auf die Schaltfläche.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                            )
+                        } else {
+                            Column {
+                                playlist.forEach { track ->
+                                    val selected = runtime.playback.chapter == track.index
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(
+                                                if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text("${track.index + 1}.", modifier = Modifier.width(28.dp))
+                                        Text(track.title, modifier = Modifier.weight(1f), maxLines = 2)
+                                        Text(track.durationSeconds?.let(::formatDuration) ?: "—", style = MaterialTheme.typography.labelSmall)
+                                        IconButton(
+                                            enabled = runtime.controls.playback,
+                                            onClick = { onSeek(track.index, 0L) },
+                                        ) { Icon(Icons.Rounded.PlayArrow, "Kapitel abspielen") }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(deviceExpanded) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HorizontalDivider()
+                            Text("Gerät", style = MaterialTheme.typography.titleSmall)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Brightness6, null)
+                                Slider(
+                                    value = brightness,
+                                    onValueChange = { brightness = it },
+                                    onValueChangeFinished = { onBrightness(brightness.toInt()) },
+                                    valueRange = 0f..100f,
+                                    modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                                )
+                                Text("${brightness.toInt()} %")
+                            }
+                            OutlinedButton(onClick = onPing, enabled = runtime.controls.ping) {
+                                Icon(Icons.Rounded.Refresh, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Box anpingen")
+                            }
                         }
                     }
                 }
@@ -1030,11 +1044,6 @@ private fun ConnectionEmptyState(title: String, detail: String, action: String, 
             Button(onClick = onAction) { Text(action) }
         }
     }
-}
-
-private fun currentTrackTitle(model: BoxUiModel): String {
-    val chapter = model.box.runtime.playback.chapter ?: 0
-    return model.metadata?.playlist?.getOrNull(chapter)?.title ?: "Kapitel ${chapter + 1}"
 }
 
 private data class PendingSeek(

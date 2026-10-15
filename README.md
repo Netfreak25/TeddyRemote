@@ -6,9 +6,9 @@ TeddyRemote ist eine moderne native Android-App zur Fernsteuerung von Toniebox-2
 
 - adaptive TB2-Karten mit Boxname, Boxbild, Onlinezustand und „Zuletzt gesehen“
 - Akku-, Kopfhörer- und sekundengenauer Bedtime-Status
-- physischer Tonie mit Bild, RUID, Titel, Kapitel und Laufzeit
+- physischer Tonie mit Bild, optionaler RUID, Titel, Kapitel und Laufzeit
 - Previous, Play/Pause, Next und Kapitelauswahl
-- Lautstärkeregelung von 0 bis 10
+- Lautstärkeregelung von 1 bis 12
 - Bedtime starten, neu setzen oder abbrechen, die Bedtime-Ringhelligkeit steuern sowie bestätigt zweistufig schlafen legen
 - optionale Ringhelligkeit
 - Android-Mediensteuerung für aktive TB2 – ohne lokale Audiowiedergabe
@@ -123,6 +123,16 @@ Fehlt die externe Release-Konfiguration, signiert Gradle den lokalen Release-Bui
 - Die App besitzt keine Audio-Engine, fordert keinen Audiofokus an und spielt keine lokalen Audiodateien ab.
 
 ## Entwicklungsstatus
+
+### 0.1.30
+
+- **Übersicht** zeigt spielende Onlineboxen zuerst, danach weitere Onlineboxen und Offlineboxen nach letztem Kontakt. Offlinekarten sind standardmäßig kompakt und lassen sich durch Antippen aufklappen.
+- Verbinden/Trennen ist direkt in der Übersicht verfügbar. Serverprofile mit API-/MQTT-Details befinden sich zusammen mit der separaten WLAN-Anzeige in den Einstellungen.
+- Die Tonie-ID ist auf Boxkarten standardmäßig verborgen und lässt sich unter **Darstellung** einblenden. Der Wiedergabeverlauf ist einklappbar und nach Name oder ID durchsuchbar.
+- Kapitelzuordnung und Dauern werden unabhängig von Figurennamen aufgelöst. Die letzte TAF-Dauer benötigt explizite Kapiteldauern oder das additive API-Feld `totalSeconds`; ohne diese Daten erscheint `—`.
+- **Beenden** stoppt Verbindungen und Mediensteuerungen. Beim nächsten bewussten App-Start gilt wieder die gespeicherte Autostartoption; normales Trennen löst keinen automatischen Wiederaufbau durch einen Seitenwechsel aus.
+
+Die separate [TeddyCloud-API-Anleitung](docs/teddycloud-playlist-api-handoff.md) beschreibt die noch serverseitig erforderliche Ergänzung. TeddyRemote spielt weiterhin selbst kein Audio ab.
 
 TeddyRemote befindet sich in aktiver Entwicklung. Die App setzt die im verwendeten TeddyCloud-TB2-Branch bereitgestellten Zustands- und Steuerendpunkte voraus; andere TeddyCloud-Versionen können noch nicht alle angezeigten Funktionen liefern.
 

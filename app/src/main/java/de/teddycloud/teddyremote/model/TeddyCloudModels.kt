@@ -124,6 +124,15 @@ data class PlaylistTrack(
     val durationSeconds: Long? = null,
 )
 
+/** A response may only be applied to the exact content and connection profile that requested it. */
+data class MetadataKey(val profileId: String, val boxId: String, val ruid: String, val contentVersion: Long?) {
+    companion object {
+        fun forBox(profileId: String, box: TonieboxDto): MetadataKey? = box.runtime.playback.ruid
+            ?.takeIf { it.matches(Regex("^[0-9A-Fa-f]{16}$")) }
+            ?.let { MetadataKey(profileId, box.id.uppercase(), it.uppercase(), box.runtime.playback.contentVersion) }
+    }
+}
+
 data class TonieMetadata(
     val ruid: String,
     val title: String,
@@ -131,6 +140,7 @@ data class TonieMetadata(
     val pictureUrl: String? = null,
     val playlist: List<PlaylistTrack> = emptyList(),
     val playlistComplete: Boolean = false,
+    val key: MetadataKey? = null,
 )
 
 data class BoxUiModel(

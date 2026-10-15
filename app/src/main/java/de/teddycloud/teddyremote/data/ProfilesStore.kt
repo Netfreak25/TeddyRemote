@@ -119,6 +119,10 @@ class ProfilesStore(
         dataStore.updateData { it.copy(themeMode = themeMode) }
     }
 
+    suspend fun setShowTonieId(show: Boolean) {
+        dataStore.updateData { it.copy(showTonieId = show) }
+    }
+
     suspend fun setResumeOfferTimeoutMinutes(timeoutMinutes: Int) {
         val boundedTimeout = timeoutMinutes.coerceIn(
             ProfilesState.MIN_RESUME_OFFER_TIMEOUT_MINUTES,

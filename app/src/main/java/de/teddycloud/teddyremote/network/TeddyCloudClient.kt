@@ -5,7 +5,6 @@ import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.model.CommandResponse
 import de.teddycloud.teddyremote.model.ConnectionProfile
 import de.teddycloud.teddyremote.model.MqttSettingsImport
-import de.teddycloud.teddyremote.model.PlaylistTrack
 import de.teddycloud.teddyremote.model.TonieMetadata
 import de.teddycloud.teddyremote.model.TonieboxCatalogEntry
 import kotlinx.serialization.json.Json
@@ -13,11 +12,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -39,6 +35,9 @@ class TeddyCloudClient private constructor(
     private val api: TeddyCloudApi,
     private val apiHttpClient: OkHttpClient,
 ) {
+    internal val profileId: String get() = profile.id
+    internal fun cancelRequests() = apiHttpClient.dispatcher.cancelAll()
+
     suspend fun getBoxes(): BoxesResponse =
         networkJson.decodeFromString(api.getBoxes().string())
 
@@ -136,33 +135,15 @@ class TeddyCloudClient private constructor(
             ?: tag.string("model")
             ?: "Tonie"
         val subtitle = info.string("series") ?: sourceInfo.string("series") ?: ""
-        val tracks = listOf(
-            playlist?.get("tracks")?.asStrings().orEmpty(),
-            sourceInfo["tracks"]?.asStrings().orEmpty(),
-            info["tracks"]?.asStrings().orEmpty(),
-        ).firstOrNull(List<String>::isNotEmpty).orEmpty()
-        val durations = playlist?.get("durations")?.asLongs().orEmpty()
-        val trackStarts = tag["trackSeconds"]?.asLongs().orEmpty()
-        val count = maxOf(
-            playlist?.get("chapterCount")?.jsonPrimitive?.intOrNull ?: 0,
-            tracks.size,
-            trackStarts.size,
-        )
-        val normalizedTracks = (0 until count.coerceAtLeast(tracks.size)).map { index ->
-            PlaylistTrack(
-                index = index,
-                title = tracks.getOrNull(index)?.takeIf(String::isNotBlank) ?: "Kapitel ${index + 1}",
-                durationSeconds = durations.getOrNull(index)
-                    ?: chapterDurationFromStarts(trackStarts, index),
-            )
-        }
+        val resolved = PlaylistResolver.resolve(tag, contentVersion)
         return TonieMetadata(
             ruid = ruid.uppercase(),
             title = title,
             subtitle = subtitle,
             pictureUrl = resolveUrl(info.string("picture") ?: sourceInfo.string("picture") ?: tag.string("picture")),
-            playlist = normalizedTracks,
-            playlistComplete = count > 0,
+            playlist = resolved.tracks,
+            playlistComplete = resolved.complete,
+            key = de.teddycloud.teddyremote.model.MetadataKey(profile.id, overlay.uppercase(), ruid.uppercase(), contentVersion),
         )
     }
 
@@ -297,15 +278,3 @@ private fun publicHostFromUrl(rawUrl: String): String {
 
 private fun JsonObject?.string(name: String): String? =
     this?.get(name)?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotBlank)
-
-private fun JsonElement.asStrings(): List<String> =
-    runCatching { jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull } }.getOrDefault(emptyList())
-
-private fun JsonElement.asLongs(): List<Long> =
-    runCatching { jsonArray.mapNotNull { it.jsonPrimitive.longOrNull } }.getOrDefault(emptyList())
-
-private fun chapterDurationFromStarts(starts: List<Long>, index: Int): Long? {
-    val start = starts.getOrNull(index) ?: return null
-    val next = starts.getOrNull(index + 1) ?: return null
-    return (next - start).takeIf { it >= 0 }
-}

@@ -123,7 +123,7 @@ class BoxMediaSessionManager(
         val model = session.model
         val playback = model.box.runtime.playback
         val chapterIndex = playback.chapter?.coerceAtLeast(0) ?: 0
-        val track = model.metadata?.playlist?.getOrNull(chapterIndex)
+        val track = model.metadata?.playlist?.firstOrNull { it.index == chapterIndex }
         val bedtime = bedtimeLabel(model)
         val boxName = model.box.boxName.ifBlank { model.box.commonName }
         val state = when (playback.status.lowercase()) {
@@ -256,7 +256,7 @@ class BoxMediaSessionManager(
         scope.launch {
             val result = imageLoader.execute(ImageRequest.Builder(context).data(url).allowHardware(false).build())
             val bitmap = result.drawable?.toBitmap()
-            if (session.artworkUrl == url && bitmap != null) {
+            if (sessions[session.model.box.id.uppercase()] === session && session.artworkUrl == url && bitmap != null) {
                 session.artwork = bitmap
                 updateSession(session)
                 updateNotification(session, bitmap)

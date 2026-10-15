@@ -21,13 +21,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-enum class AppScreen { OVERVIEW, HOME, SETTINGS, DIAGNOSTICS, PROFILE_EDITOR }
+enum class AppScreen { HOME, SETTINGS, DIAGNOSTICS, PROFILE_EDITOR }
 
 data class MainUiState(
     val profiles: ProfilesState = ProfilesState(),
     val connection: ConnectionStatus = ConnectionStatus(),
     val boxes: List<BoxUiModel> = emptyList(),
-    val screen: AppScreen = AppScreen.OVERVIEW,
+    val screen: AppScreen = AppScreen.HOME,
     val profileEditor: ProfileEditorUiState? = null,
     val focusedBoxId: String? = null,
     val isRefreshing: Boolean = false,
@@ -70,7 +70,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         MainUiState(
             profiles = persisted.first,
             connection = connection,
-            boxes = boxes,
+            boxes = sortedBoxes(boxes),
             screen = local.screen,
             profileEditor = editor,
             focusedBoxId = local.focusedBoxId,
@@ -111,7 +111,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             val saved = container.profilesStore.saveProfile(editor.draft.profile.normalized(), editor.draft.password)
             container.profilesStore.activateProfile(saved.id)
             transient.value = transient.value.copy(
-                screen = if (wasOnboarding) AppScreen.OVERVIEW else AppScreen.SETTINGS,
+                screen = if (wasOnboarding) AppScreen.HOME else AppScreen.SETTINGS,
             )
             profileEditorController.close()
             if (connectAfterSave) container.repository.connect()
@@ -198,6 +198,10 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.profilesStore.setThemeMode(themeMode) }
     }
 
+    fun setShowTonieId(show: Boolean) {
+        viewModelScope.launch { container.profilesStore.setShowTonieId(show) }
+    }
+
     fun setResumeOfferTimeoutMinutes(timeoutMinutes: Int) {
         viewModelScope.launch { container.repository.setResumeOfferTimeoutMinutes(timeoutMinutes) }
     }
@@ -235,7 +239,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private data class TransientState(
-        val screen: AppScreen = AppScreen.OVERVIEW,
+        val screen: AppScreen = AppScreen.HOME,
         val focusedBoxId: String? = null,
         val isRefreshing: Boolean = false,
     )

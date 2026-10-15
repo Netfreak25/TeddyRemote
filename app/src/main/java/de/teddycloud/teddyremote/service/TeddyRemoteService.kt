@@ -33,11 +33,18 @@ class TeddyRemoteService : Service() {
     private lateinit var repository: TeddyRemoteRepository
     private lateinit var currentConnectionStatus: ConnectionStatus
     private var onlineBoxCount = 0
+    private var stopping = false
+    private val app get() = application as TeddyRemoteApplication
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         repository = (application as TeddyRemoteApplication).container.repository
+        if (app.connectionLifecycle.closed.value || !repository.connection.value.desiredConnected) {
+            stopping = true
+            stopSelf()
+            return
+        }
         mediaSessions = BoxMediaSessionManager(this, repository, scope)
         currentConnectionStatus = repository.connection.value
         onlineBoxCount = repository.boxes.value.count { it.box.runtime.online }
@@ -47,6 +54,7 @@ class TeddyRemoteService : Service() {
         )
         scope.launch {
             repository.boxes.collectLatest { boxes ->
+                if (stopping || app.connectionLifecycle.closed.value) return@collectLatest
                 mediaSessions.update(boxes)
                 val newOnlineBoxCount = boxes.count { it.box.runtime.online }
                 if (newOnlineBoxCount != onlineBoxCount) {
@@ -67,12 +75,20 @@ class TeddyRemoteService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+        if (action == ACTION_STOP) {
+            stopping = true
+            app.connectionLifecycle.quit()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (stopping || app.connectionLifecycle.closed.value || !repository.connection.value.desiredConnected) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (action) {
             ACTION_RECONNECT -> scope.launch { repository.connect() }
-            ACTION_STOP -> scope.launch {
-                repository.disconnect()
-                stopSelf()
-            }
             else -> {
                 val boxId = intent?.getStringExtra(EXTRA_BOX_ID)
                 if (boxId != null && action != null) mediaSessions.handleAction(boxId, action)
@@ -82,7 +98,10 @@ class TeddyRemoteService : Service() {
     }
 
     override fun onDestroy() {
-        mediaSessions.release()
+        stopping = true
+        if (::mediaSessions.isInitialized) mediaSessions.release()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        app.connectionLifecycle.serviceDestroyed()
         scope.cancel()
         super.onDestroy()
     }
@@ -90,6 +109,7 @@ class TeddyRemoteService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun updateConnectionNotification() {
+        if (stopping || app.connectionLifecycle.closed.value || !repository.connection.value.desiredConnected) return
         getSystemService(NotificationManager::class.java).notify(
             CONNECTION_NOTIFICATION_ID,
             connectionNotification(currentConnectionStatus, onlineBoxCount),
@@ -187,13 +207,15 @@ class TeddyRemoteService : Service() {
         private const val REQUEST_STOP = 82
         private const val LOG_TAG = "TeddyRemoteService"
 
-        fun start(context: Context) {
-            try {
+        fun start(context: Context): Boolean {
+            return try {
                 ContextCompat.startForegroundService(context, Intent(context, TeddyRemoteService::class.java))
+                true
             } catch (error: IllegalStateException) {
                 // Android 12+ rejects foreground-service starts while the process is cached.
                 // The application lifecycle retries when the UI next enters the foreground.
                 Log.w(LOG_TAG, "Foreground service start deferred until the app is visible", error)
+                false
             }
         }
 

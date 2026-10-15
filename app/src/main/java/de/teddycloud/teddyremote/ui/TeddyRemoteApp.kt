@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
@@ -32,7 +31,6 @@ fun TeddyRemoteApp(
     val context = LocalContext.current
     TeddyRemoteTheme(state.profiles.themeMode) {
         val showNavigation = !state.needsOnboarding && state.screen in setOf(
-            AppScreen.OVERVIEW,
             AppScreen.HOME,
             AppScreen.SETTINGS,
         )
@@ -41,16 +39,10 @@ fun TeddyRemoteApp(
                 if (showNavigation) {
                     NavigationBar {
                         NavigationBarItem(
-                            selected = state.screen == AppScreen.OVERVIEW,
-                            onClick = { viewModel.navigate(AppScreen.OVERVIEW) },
-                            icon = { Icon(Icons.Rounded.Dashboard, null) },
-                            label = { Text("Übersicht") },
-                        )
-                        NavigationBarItem(
                             selected = state.screen == AppScreen.HOME,
                             onClick = { viewModel.navigate(AppScreen.HOME) },
                             icon = { Icon(Icons.Rounded.Home, null) },
-                            label = { Text("Boxen") },
+                            label = { Text("Übersicht") },
                         )
                         NavigationBarItem(
                             selected = state.screen == AppScreen.SETTINGS,
@@ -69,7 +61,7 @@ fun TeddyRemoteApp(
                     )
                     state.screen == AppScreen.PROFILE_EDITOR && state.profileEditor != null -> ProfileEditorScreen(
                         editor = requireNotNull(state.profileEditor),
-                        onBack = { viewModel.navigate(if (state.needsOnboarding) AppScreen.OVERVIEW else AppScreen.SETTINGS) },
+                        onBack = { viewModel.navigate(if (state.needsOnboarding) AppScreen.HOME else AppScreen.SETTINGS) },
                         onSave = viewModel::saveProfile,
                         onProfileChange = viewModel::updateEditingProfile,
                         onPasswordChange = viewModel::updateEditingPassword,
@@ -92,22 +84,20 @@ fun TeddyRemoteApp(
                         onDelete = viewModel::deleteProfile,
                         onActivate = viewModel::activateProfile,
                         onTheme = viewModel::setTheme,
+                        onShowTonieId = viewModel::setShowTonieId,
+                        onConnect = viewModel::connect,
+                        onDisconnect = viewModel::disconnect,
                         onResumeOfferTimeout = viewModel::setResumeOfferTimeoutMinutes,
                         onTonieAutoResume = viewModel::setTonieAutoResume,
                         onDiagnostics = { viewModel.navigate(AppScreen.DIAGNOSTICS) },
                         onOpenMqttGuide = { openMqttGuide(context) },
                     )
-                    state.screen == AppScreen.OVERVIEW -> ConnectionOverviewScreen(
-                        state = state,
-                        onConnect = viewModel::connect,
-                        onDisconnect = viewModel::disconnect,
-                        onOpenBoxes = { viewModel.navigate(AppScreen.HOME) },
-                        onOpenSettings = { viewModel.navigate(AppScreen.SETTINGS) },
-                    )
                     else -> HomeScreen(
                         state = state,
                         onRefresh = viewModel::refresh,
-                        onOpenOverview = { viewModel.navigate(AppScreen.OVERVIEW) },
+                        onOpenSettings = { viewModel.navigate(AppScreen.SETTINGS) },
+                        onConnect = viewModel::connect,
+                        onDisconnect = viewModel::disconnect,
                         onPlayback = viewModel::playback,
                         onSeek = viewModel::seek,
                         onResumePlayback = viewModel::resumePlayback,

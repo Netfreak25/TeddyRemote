@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -112,18 +113,15 @@ fun SettingsScreen(
     onDelete: (String) -> Unit,
     onActivate: (String) -> Unit,
     onTheme: (ThemeMode) -> Unit,
+    onShowTonieId: (Boolean) -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
     onResumeOfferTimeout: (Int) -> Unit,
     onTonieAutoResume: (String, Boolean) -> Unit,
     onDiagnostics: () -> Unit,
     onOpenMqttGuide: () -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<ConnectionProfile?>(null) }
-    var resumeTimeoutText by remember(state.profiles.resumeOfferTimeoutMinutes) {
-        mutableStateOf(state.profiles.resumeOfferTimeoutMinutes.toString())
-    }
-    val resumeTimeout = resumeTimeoutText.toIntOrNull()
-    val resumeTimeoutValid = resumeTimeout != null &&
-        resumeTimeout in ProfilesState.MIN_RESUME_OFFER_TIMEOUT_MINUTES..ProfilesState.MAX_RESUME_OFFER_TIMEOUT_MINUTES
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Einstellungen") },
@@ -148,63 +146,18 @@ fun SettingsScreen(
                     Text("Neu")
                 }
             }
+            WifiStatus(state)
             state.profiles.profiles.forEach { profile ->
-                val active = profile.id == state.profiles.activeProfileId
-                Card(
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    border = if (active) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-                ) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Cloud, null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(profile.name, style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    profile.apiBaseUrl,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    if (profile.mqttEnabled) "MQTT · ${profile.mqttHost}:${profile.mqttPort} · ${profile.mqttPrefix}" else "MQTT deaktiviert",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            if (active) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Rounded.CheckCircle, "Aktiv", tint = MaterialTheme.colorScheme.primary)
-                                    Text("Aktiv", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                        HorizontalDivider()
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (!active) {
-                                TextButton(onClick = { onActivate(profile.id) }) { Text("Aktivieren") }
-                            }
-                            TextButton(onClick = { onEdit(profile) }) {
-                                Icon(Icons.Rounded.Edit, null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Bearbeiten")
-                            }
-                            IconButton(onClick = { onDuplicate(profile.id) }) {
-                                Icon(Icons.Rounded.ContentCopy, "Duplizieren")
-                            }
-                            Spacer(Modifier.weight(1f))
-                            IconButton(onClick = { pendingDelete = profile }) {
-                                Icon(Icons.Rounded.Delete, "Löschen", tint = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-                }
+                ServerProfileCard(
+                    profile = profile,
+                    state = state,
+                    onConnect = onConnect,
+                    onDisconnect = onDisconnect,
+                    onEdit = { onEdit(profile) },
+                    onActivate = { onActivate(profile.id) },
+                    onDuplicate = { onDuplicate(profile.id) },
+                    onDelete = { pendingDelete = profile },
+                )
             }
 
             Text("App", style = MaterialTheme.typography.titleLarge)
@@ -215,6 +168,13 @@ fun SettingsScreen(
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text("Darstellung", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onShowTonieId(!state.profiles.showTonieId) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(state.profiles.showTonieId, onCheckedChange = onShowTonieId)
+                        Text("Tonie-ID anzeigen")
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ThemeMode.entries.forEach { mode ->
                             FilterChip(
@@ -251,92 +211,7 @@ fun SettingsScreen(
                 }
             }
 
-            Text("Wiedergabeverlauf", style = MaterialTheme.typography.titleLarge)
-            Card(
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            ) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Fortsetzen-Angebot", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "So lange bleibt die bisherige Position geschützt, bevor die aktuelle Wiedergabeposition übernommen wird.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = resumeTimeoutText,
-                        onValueChange = { value ->
-                            if (value.length <= 3 && value.all(Char::isDigit)) {
-                                resumeTimeoutText = value
-                                value.toIntOrNull()
-                                    ?.takeIf {
-                                        it in ProfilesState.MIN_RESUME_OFFER_TIMEOUT_MINUTES..
-                                            ProfilesState.MAX_RESUME_OFFER_TIMEOUT_MINUTES
-                                    }
-                                    ?.let(onResumeOfferTimeout)
-                            }
-                        },
-                        label = { Text("Antwortfrist") },
-                        suffix = { Text("Minuten") },
-                        supportingText = {
-                            Text(
-                                if (resumeTimeoutValid) {
-                                    "1 bis 120 Minuten"
-                                } else {
-                                    "Bitte einen Wert zwischen 1 und 120 eingeben"
-                                },
-                            )
-                        },
-                        isError = !resumeTimeoutValid,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    HorizontalDivider()
-                    Text("Auto-Resume pro Tonie", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Die Einstellung gilt anhand der RUID auch nach einem Content- oder Versionswechsel.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (state.knownTonies.isEmpty()) {
-                        Text(
-                            "Noch keine Tonies mit Wiedergabeverlauf erkannt.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        state.knownTonies.sortedByDescending { it.updatedAtEpochMs }.forEachIndexed { index, tonie ->
-                            if (index > 0) HorizontalDivider()
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        tonie.title,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        tonie.ruid,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Switch(
-                                    checked = tonie.autoResumeEnabled,
-                                    onCheckedChange = { enabled -> onTonieAutoResume(tonie.ruid, enabled) },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            PlaybackHistorySettings(state, onResumeOfferTimeout, onTonieAutoResume)
 
             Text("Anleitungen", style = MaterialTheme.typography.titleLarge)
             Card(
