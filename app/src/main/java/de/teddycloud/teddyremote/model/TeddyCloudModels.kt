@@ -141,6 +141,7 @@ data class TonieMetadata(
     val playlist: List<PlaylistTrack> = emptyList(),
     val playlistComplete: Boolean = false,
     val key: MetadataKey? = null,
+    val introOutroPlaylist: List<PlaylistTrack>? = null,
 )
 
 data class BoxUiModel(

@@ -254,4 +254,17 @@ class TeddyCloudClientTest {
         assertTrue(png.contentEquals(result))
         assertEquals("/cache/box.png", server.takeRequest().path)
     }
+
+    @Test
+    fun `returns normal and inferred playlist from the same single API response`() = runTest {
+        server.enqueue(MockResponse().setBody(
+            """{"tagInfo":{"tonieInfo":{"episode":"Figur","picture":"/original.png"},"sourceInfo":{"tracks":["A","B"]},"trackSeconds":[0,10,70,140],"totalSeconds":150}}""",
+        ))
+        val metadata = client.getTonieMetadata("BOX", "28F28F11500304E0", 46)
+        assertEquals("Figur", metadata.title)
+        assertEquals(listOf("A", "B", "Kapitel 3", "Kapitel 4"), metadata.playlist.map { it.title })
+        assertEquals(listOf("Intro", "A", "B", "Outro"), metadata.introOutroPlaylist?.map { it.title })
+        assertEquals(listOf(10L, 60L, 70L, 10L), metadata.introOutroPlaylist?.map { it.durationSeconds })
+        assertEquals(1, server.requestCount)
+    }
 }

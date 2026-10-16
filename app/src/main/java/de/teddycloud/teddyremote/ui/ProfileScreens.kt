@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -63,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -103,6 +105,24 @@ fun OnboardingScreen(onCreateProfile: () -> Unit) {
     }
 }
 
+@Composable
+internal fun IntroOutroSetting(enabled: Boolean, onChanged: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().toggleable(value = enabled, role = Role.Checkbox, onValueChange = onChanged),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(enabled, onCheckedChange = null)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Fehlendes Intro und Outro ergänzen")
+            Text(
+                "Wenn der Content genau zwei Kapitel mehr als Kapitelnamen enthält, werden ein Intro und ein Outro angenommen.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -114,6 +134,7 @@ fun SettingsScreen(
     onActivate: (String) -> Unit,
     onTheme: (ThemeMode) -> Unit,
     onShowTonieId: (Boolean) -> Unit,
+    onInferIntroOutro: (Boolean) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onResumeOfferTimeout: (Int) -> Unit,
@@ -175,6 +196,7 @@ fun SettingsScreen(
                         Checkbox(state.profiles.showTonieId, onCheckedChange = onShowTonieId)
                         Text("Tonie-ID anzeigen")
                     }
+                    IntroOutroSetting(state.profiles.inferIntroOutro, onInferIntroOutro)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ThemeMode.entries.forEach { mode ->
                             FilterChip(

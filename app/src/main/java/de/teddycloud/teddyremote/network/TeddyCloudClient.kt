@@ -143,6 +143,7 @@ class TeddyCloudClient private constructor(
             pictureUrl = resolveUrl(info.string("picture") ?: sourceInfo.string("picture") ?: tag.string("picture")),
             playlist = resolved.tracks,
             playlistComplete = resolved.complete,
+            introOutroPlaylist = resolved.introOutroTracks,
             key = de.teddycloud.teddyremote.model.MetadataKey(profile.id, overlay.uppercase(), ruid.uppercase(), contentVersion),
         )
     }

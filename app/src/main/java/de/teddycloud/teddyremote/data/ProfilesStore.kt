@@ -23,7 +23,7 @@ private val profileJson = Json {
     prettyPrint = false
 }
 
-private object ProfilesSerializer : Serializer<ProfilesState> {
+internal object ProfilesSerializer : Serializer<ProfilesState> {
     override val defaultValue: ProfilesState = ProfilesState()
 
     override suspend fun readFrom(input: InputStream): ProfilesState = try {
@@ -121,6 +121,10 @@ class ProfilesStore(
 
     suspend fun setShowTonieId(show: Boolean) {
         dataStore.updateData { it.copy(showTonieId = show) }
+    }
+
+    suspend fun setInferIntroOutro(enabled: Boolean) {
+        dataStore.updateData { it.copy(inferIntroOutro = enabled) }
     }
 
     suspend fun setResumeOfferTimeoutMinutes(timeoutMinutes: Int) {

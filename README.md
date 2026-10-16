@@ -124,6 +124,12 @@ Fehlt die externe Release-Konfiguration, signiert Gradle den lokalen Release-Bui
 
 ## Entwicklungsstatus
 
+### 0.1.31
+
+- Unter **Einstellungen → Darstellung** lässt sich **Fehlendes Intro und Outro ergänzen** aktivieren (standardmäßig aus). Nur wenn die bekannte Kapitelzahl genau zwei größer als die vollständige Namensliste ist, nimmt TeddyRemote ein Intro und ein Outro an.
+- Die Umschaltung wirkt sofort auf geladene Playlists in App und Android-Mediensteuerung, ohne erneute Netzwerkanfrage. Kapitelindizes, Seek-Ziele und gespeicherte Positionen bleiben unverändert.
+- Dauern bleiben den tatsächlichen Kapiteln zugeordnet. Verkürzte Dauerlisten werden nicht verschoben; stattdessen gelten Kapitelstarts und, für das letzte Kapitel, die Gesamtdauer. Fehlen belastbare Zeitdaten, bleibt die Anzeige **—**.
+
 ### 0.1.30
 
 - **Übersicht** zeigt spielende Onlineboxen zuerst, danach weitere Onlineboxen und Offlineboxen nach letztem Kontakt. Offlinekarten sind standardmäßig kompakt und lassen sich durch Antippen aufklappen.

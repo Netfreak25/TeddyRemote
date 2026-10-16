@@ -184,7 +184,7 @@ class BoxMediaSessionManager(
     private fun updateNotification(session: BoxSession, artwork: Bitmap?) {
         val model = session.model
         val playing = model.box.runtime.playback.isPlaying
-        val chapter = model.metadata?.playlist?.getOrNull(model.box.runtime.playback.chapter ?: 0)?.title
+        val chapter = model.metadata?.playlist?.firstOrNull { it.index == model.box.runtime.playback.chapter }?.title
         val bedtime = bedtimeLabel(model)
         val subText = listOfNotNull(chapter, bedtime).joinToString(" · ")
         val builder = Notification.Builder(context, TeddyRemoteService.CHANNEL_ID)

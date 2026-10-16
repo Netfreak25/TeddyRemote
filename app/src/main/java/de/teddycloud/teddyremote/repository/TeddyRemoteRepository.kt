@@ -46,6 +46,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
@@ -71,7 +74,9 @@ class TeddyRemoteRepository(
     private val _connection = MutableStateFlow(ConnectionStatus())
     val connection: StateFlow<ConnectionStatus> = _connection.asStateFlow()
     private val _boxes = MutableStateFlow<List<BoxUiModel>>(emptyList())
-    val boxes: StateFlow<List<BoxUiModel>> = _boxes.asStateFlow()
+    val boxes: StateFlow<List<BoxUiModel>> = playlistDisplayFlow(
+        _boxes, profilesStore.state.map { it.inferIntroOutro },
+    ).stateIn(scope, SharingStarted.Eagerly, emptyList())
     private val _foreground = MutableStateFlow(true)
 
     private var api: TeddyCloudClient? = null
@@ -856,7 +861,7 @@ class TeddyRemoteRepository(
             )
             val autoResumeBoxes = playbackResume.observe(
                 profileId = activeProfile?.id,
-                boxes = _boxes.value,
+                boxes = displayPlaylists(_boxes.value, settings.inferIntroOutro),
                 policy = PlaybackResumePolicy(
                     offerTimeoutMs = timeoutMinutes * MILLIS_PER_MINUTE,
                 ),

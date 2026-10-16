@@ -202,6 +202,10 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.profilesStore.setShowTonieId(show) }
     }
 
+    fun setInferIntroOutro(enabled: Boolean) {
+        viewModelScope.launch { container.profilesStore.setInferIntroOutro(enabled) }
+    }
+
     fun setResumeOfferTimeoutMinutes(timeoutMinutes: Int) {
         viewModelScope.launch { container.repository.setResumeOfferTimeoutMinutes(timeoutMinutes) }
     }

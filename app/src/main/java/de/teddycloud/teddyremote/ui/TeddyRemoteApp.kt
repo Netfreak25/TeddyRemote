@@ -85,6 +85,7 @@ fun TeddyRemoteApp(
                         onActivate = viewModel::activateProfile,
                         onTheme = viewModel::setTheme,
                         onShowTonieId = viewModel::setShowTonieId,
+                        onInferIntroOutro = viewModel::setInferIntroOutro,
                         onConnect = viewModel::connect,
                         onDisconnect = viewModel::disconnect,
                         onResumeOfferTimeout = viewModel::setResumeOfferTimeoutMinutes,

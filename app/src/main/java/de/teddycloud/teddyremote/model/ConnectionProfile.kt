@@ -100,6 +100,7 @@ data class ProfilesState(
     val connectionRequested: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val showTonieId: Boolean = false,
+    val inferIntroOutro: Boolean = false,
     val resumeOfferTimeoutMinutes: Int = DEFAULT_RESUME_OFFER_TIMEOUT_MINUTES,
 ) {
     val activeProfile: ConnectionProfile?

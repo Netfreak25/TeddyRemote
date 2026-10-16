@@ -11,6 +11,20 @@ import org.junit.Test
 class OverviewSettingsTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun introOutroCheckboxStartsOffAndTogglesOncePerTap() {
+        val enabled = mutableStateOf(ProfilesState().inferIntroOutro)
+        var changes = 0
+        compose.setContent {
+            TeddyRemoteTheme(ThemeMode.LIGHT) {
+                IntroOutroSetting(enabled.value) { enabled.value = it; changes++ }
+            }
+        }
+        val option = compose.onNodeWithText("Fehlendes Intro und Outro ergänzen")
+        option.assertIsOff().performClick().assertIsOn()
+        option.performClick().assertIsOff()
+        compose.runOnIdle { assertEquals(2, changes) }
+    }
+
     @Test fun offlineCardExpandsAndControlsDoNotCollapseIt() {
         val model = mutableStateOf(BoxUiModel(TonieboxDto("BOX", boxName = "Testbox", runtime = BoxRuntime(
             online = false,
