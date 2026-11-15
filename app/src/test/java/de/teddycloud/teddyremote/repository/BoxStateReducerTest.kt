@@ -1,11 +1,46 @@
 package de.teddycloud.teddyremote.repository
 
 import de.teddycloud.teddyremote.model.BoxRuntime
+import de.teddycloud.teddyremote.model.PlaybackRuntime
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BoxStateReducerTest {
+    private fun revisedRuntime() = BoxRuntime(playback = PlaybackRuntime(
+        ruid = "AAAAAAAAAAAAAAAA", contentVersion = 42, metadataRevision = "revision-A",
+    ))
+
+    @Test
+    fun `changing or clearing content identity discards its old metadata revision`() {
+        val original = revisedRuntime()
+        for ((field, value) in listOf(
+            "PlaybackRuid" to "BBBBBBBBBBBBBBBB",
+            "PlaybackContentVersion" to "43",
+            "PlaybackRuid" to "",
+            "PlaybackContentVersion" to "",
+        )) {
+            val updated = BoxStateReducer.reduce(original, field, value, 101)
+            assertNull("$field=$value must not keep the previous content revision", updated.playback.metadataRevision)
+        }
+    }
+
+    @Test
+    fun `duplicate identities and playback updates preserve the current metadata revision`() {
+        val original = revisedRuntime()
+        for ((field, value) in listOf(
+            "PlaybackRuid" to "AAAAAAAAAAAAAAAA",
+            "PlaybackRuid" to "aaaaaaaaaaaaaaaa",
+            "PlaybackContentVersion" to "42",
+            "PlaybackStatus" to "playing",
+            "PlaybackChapter" to "1",
+        )) {
+            val updated = BoxStateReducer.reduce(original, field, value, 101)
+            assertEquals("$field=$value must keep the current content revision", "revision-A", updated.playback.metadataRevision)
+        }
+    }
+
     @Test
     fun `updates playback and accepts the complete TB2 volume range`() {
         val playing = BoxStateReducer.reduce(BoxRuntime(), "PlaybackStatus", "playing", 100)

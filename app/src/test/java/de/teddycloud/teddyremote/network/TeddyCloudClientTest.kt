@@ -1,6 +1,11 @@
 package de.teddycloud.teddyremote.network
 
 import de.teddycloud.teddyremote.model.ConnectionProfile
+import de.teddycloud.teddyremote.model.BoxRuntime
+import de.teddycloud.teddyremote.model.MetadataKey
+import de.teddycloud.teddyremote.model.PlaybackRuntime
+import de.teddycloud.teddyremote.model.TonieboxDto
+import de.teddycloud.teddyremote.repository.BoxStateReducer
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -272,6 +277,37 @@ class TeddyCloudClientTest {
         assertEquals("ready", metadata.metadataState)
         assertEquals("rev42", metadata.key?.metadataRevision)
         assertTrue(metadata.introOutroPlaylist == null)
+    }
+
+    @Test
+    fun `MQTT content switch accepts the new native playlist without waiting for a box snapshot`() = runTest {
+        val original = BoxRuntime(playback = PlaybackRuntime(
+            ruid = "AAAAAAAAAAAAAAAA", contentVersion = 42, metadataRevision = "revision-A",
+        ))
+        val ruidChange = "PlaybackRuid" to "BBBBBBBBBBBBBBBB"
+        val versionChange = "PlaybackContentVersion" to "43"
+        val sequences = listOf(
+            listOf(ruidChange), listOf(versionChange),
+            listOf(ruidChange, versionChange), listOf(versionChange, ruidChange),
+        )
+        for (events in sequences) {
+            val runtime = events.fold(original) { state, (field, value) ->
+                BoxStateReducer.reduce(state, field, value, 101)
+            }
+            val key = requireNotNull(MetadataKey.forBox(client.profileId, TonieboxDto("BOX", runtime = runtime)))
+            server.enqueue(MockResponse().setBody(
+                """{"tagInfo":{"playlist":{"kind":"native_collection","contentVersion":${key.contentVersion},"metadataRevision":"revision-B","chapterCount":1,"title":"Content B","tracks":["New chapter"],"durations":[1.25]}}}""",
+            ))
+            val metadata = client.getTonieMetadata("BOX", key.ruid, key.contentVersion, key.metadataRevision)
+
+            // The repository accepts a metadata response only when this key matches.
+            assertEquals("New content must not be rejected for $events", key, metadata.key)
+            assertEquals("revision-B", metadata.metadataRevision)
+            assertEquals("Content B", metadata.title)
+            assertEquals("New chapter", metadata.playlist.single().title)
+            assertEquals(1250L, metadata.playlist.single().durationMs)
+        }
+        assertEquals(sequences.size, server.requestCount)
     }
 
     @Test

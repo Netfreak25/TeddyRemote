@@ -124,6 +124,11 @@ Fehlt die externe Release-Konfiguration, signiert Gradle den lokalen Release-Bui
 
 ## Entwicklungsstatus
 
+### 0.1.32
+
+- Beim MQTT-Wechsel der RUID oder Contentversion wird die Metadatenrevision des vorherigen Inhalts verworfen. Die passende neue Playlist kann direkt übernommen werden, ohne auf den nächsten Box-Zustandsabgleich zu warten. Wiederholte Identitätsmeldungen und Kapitelwechsel behalten die aktuelle Revision.
+- Native Playlists sind versionsgebunden; dezimale Kapiteldauern bleiben intern millisekundengenau. Nachgelieferte Metadaten werden über ihre Revision erkannt, und vollständig bekannte Dauern ergeben eine Gesamtzeit. Die Intro-/Outro-Heuristik wird auf native Collections nicht angewendet.
+
 ### 0.1.31
 
 - Unter **Einstellungen → Darstellung** lässt sich **Fehlendes Intro und Outro ergänzen** aktivieren (standardmäßig aus). Nur wenn die bekannte Kapitelzahl genau zwei größer als die vollständige Namensliste ist, nimmt TeddyRemote ein Intro und ein Outro an.

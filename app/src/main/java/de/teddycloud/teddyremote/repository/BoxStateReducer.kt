@@ -4,12 +4,29 @@ import de.teddycloud.teddyremote.model.BoxRuntime
 import de.teddycloud.teddyremote.model.BoxVolume
 import de.teddycloud.teddyremote.model.VolumeRuntime
 
+/** MQTT identity changes invalidate the metadata revision learned for the previous content. */
 object BoxStateReducer {
     fun reduce(runtime: BoxRuntime, field: String, raw: String, timestampSeconds: Long): BoxRuntime = when (field) {
         "PlaybackStatus" -> runtime.copy(playback = runtime.playback.copy(valid = true, status = raw, updatedAt = timestampSeconds))
         "PlaybackTonie" -> runtime.copy(playback = runtime.playback.copy(valid = true, tonie = raw.ifBlank { null }, updatedAt = timestampSeconds))
-        "PlaybackRuid" -> runtime.copy(playback = runtime.playback.copy(valid = true, ruid = raw.ifBlank { null }, updatedAt = timestampSeconds))
-        "PlaybackContentVersion" -> runtime.copy(playback = runtime.playback.copy(valid = true, contentVersion = raw.toLongOrNull(), updatedAt = timestampSeconds))
+        "PlaybackRuid" -> {
+            val ruid = raw.ifBlank { null }
+            runtime.copy(playback = runtime.playback.copy(
+                valid = true, ruid = ruid, updatedAt = timestampSeconds,
+                metadataRevision = runtime.playback.metadataRevision.takeIf {
+                    runtime.playback.ruid.equals(ruid, ignoreCase = true)
+                },
+            ))
+        }
+        "PlaybackContentVersion" -> {
+            val version = raw.toLongOrNull()
+            runtime.copy(playback = runtime.playback.copy(
+                valid = true, contentVersion = version, updatedAt = timestampSeconds,
+                metadataRevision = runtime.playback.metadataRevision.takeIf {
+                    runtime.playback.contentVersion == version
+                },
+            ))
+        }
         "PlaybackChapter" -> runtime.copy(playback = runtime.playback.copy(valid = true, chapter = raw.toIntOrNull(), updatedAt = timestampSeconds))
         "PlaybackChapterUntilMs" -> runtime.copy(playback = runtime.playback.copy(valid = true, chapterUntilMs = raw.toLongOrNull(), updatedAt = timestampSeconds))
         "PlaybackChapterDuration" -> runtime.copy(playback = runtime.playback.copy(valid = true, chapterDuration = raw.ifBlank { null }, updatedAt = timestampSeconds))
