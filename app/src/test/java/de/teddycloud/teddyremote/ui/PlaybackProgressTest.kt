@@ -7,6 +7,14 @@ import org.junit.Test
 
 class PlaybackProgressTest {
     @Test
+    fun `fractional playlist fallback preserves milliseconds and box duration takes priority`() {
+        val playback = PlaybackRuntime(status = "playing", chapterUntilMs = 200_125L)
+        assertEquals(125L, PlaybackProgress.calculate(playback, 1125L, 199_125L)?.positionMs)
+        assertEquals(1125L, PlaybackProgress.calculate(playback, 1125L, 199_125L)?.durationMs)
+        assertEquals(2250L, PlaybackProgress.calculate(playback.copy(chapterDuration = "2.25"), 1125L, 199_125L)?.durationMs)
+    }
+
+    @Test
     fun `calculates a playing chapter from its absolute deadline`() {
         val progress = PlaybackProgress.calculate(
             playback = PlaybackRuntime(
@@ -15,7 +23,7 @@ class PlaybackProgressTest {
                 chapterUntilMs = 1_124_293L,
                 chapterDuration = "124.293",
             ),
-            fallbackDurationSeconds = null,
+            fallbackDurationMs = null,
             nowEpochMillis = 1_103_000L,
         )
 
@@ -33,7 +41,7 @@ class PlaybackProgressTest {
                 chapterUntilMs = 1_130_000L,
                 chapterDuration = "90",
             ),
-            fallbackDurationSeconds = null,
+            fallbackDurationMs = null,
             nowEpochMillis = 1_900_000L,
         )
 
@@ -50,9 +58,9 @@ class PlaybackProgressTest {
 
         assertEquals(
             60_000L,
-            PlaybackProgress.calculate(playback, 61L, 1_060_000L)?.positionMs,
+            PlaybackProgress.calculate(playback, 61_000L, 1_060_000L)?.positionMs,
         )
-        assertNull(PlaybackProgress.calculate(playback.copy(chapterUntilMs = null), 61L, 1_060_000L))
+        assertNull(PlaybackProgress.calculate(playback.copy(chapterUntilMs = null), 61_000L, 1_060_000L))
         assertNull(PlaybackProgress.calculate(playback, null, 1_060_000L))
     }
 

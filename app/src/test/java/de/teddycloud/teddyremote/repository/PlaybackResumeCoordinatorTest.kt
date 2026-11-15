@@ -261,8 +261,8 @@ class PlaybackResumeCoordinatorTest {
                 ruid = ruid,
                 title = "Testtonie",
                 playlist = listOf(
-                    PlaylistTrack(0, "Kapitel 1", durationMs / 1_000L),
-                    PlaylistTrack(1, "Kapitel 2", durationMs / 1_000L),
+                    PlaylistTrack(0, "Kapitel 1", durationMs),
+                    PlaylistTrack(1, "Kapitel 2", durationMs),
                 ),
                 playlistComplete = true,
             ),

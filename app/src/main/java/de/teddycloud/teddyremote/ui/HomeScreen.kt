@@ -230,10 +230,10 @@ internal fun TonieboxCard(
     var expanded by rememberSaveable(model.box.id, runtime.online) { mutableStateOf(runtime.online) }
     val confirmedVolume = model.desiredVolume ?: runtime.volume.level ?: BoxVolume.MIN_LEVEL
     val currentChapter = runtime.playback.chapter
-    val fallbackDurationSeconds = model.metadata?.playlist
+    val fallbackDurationMs = model.metadata?.playlist
         ?.firstOrNull { it.index == currentChapter }
-        ?.durationSeconds
-    val calculatedProgress = rememberChapterProgress(runtime.playback, fallbackDurationSeconds)
+        ?.durationMs
+    val calculatedProgress = rememberChapterProgress(runtime.playback, fallbackDurationMs)
     var draggedSeekMs by remember(model.box.id, runtime.playback.ruid, runtime.playback.contentVersion, currentChapter) {
         mutableStateOf<Long?>(null)
     }
@@ -521,13 +521,20 @@ internal fun TonieboxCard(
                     AnimatedVisibility(playlistExpanded) {
                         if (playlist.isEmpty()) {
                             Text(
-                                "Noch keine Kapitelinformationen verfügbar. Tippe zum erneuten Laden noch einmal auf die Schaltfläche.",
+                                if (model.metadata?.metadataState == "pending") {
+                                    "Kapitelinformationen werden nachgeladen. Die Anzeige aktualisiert sich automatisch."
+                                } else {
+                                    "Kapitelanzahl und Laufzeiten sind noch unbekannt. Tippe zum erneuten Laden auf die Schaltfläche."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 8.dp),
                             )
                         } else {
                             Column {
+                                model.metadata?.totalDurationMs?.let { total ->
+                                    Text("Gesamt: ${PlaybackProgress.formatTime(total)}", style = MaterialTheme.typography.labelSmall)
+                                }
                                 playlist.forEach { track ->
                                     val selected = runtime.playback.chapter == track.index
                                     Row(
@@ -542,7 +549,7 @@ internal fun TonieboxCard(
                                     ) {
                                         Text("${track.index + 1}.", modifier = Modifier.width(28.dp))
                                         Text(track.title, modifier = Modifier.weight(1f), maxLines = 2)
-                                        Text(track.durationSeconds?.let(::formatDuration) ?: "—", style = MaterialTheme.typography.labelSmall)
+                                        Text(track.durationMs?.let(PlaybackProgress::formatTime) ?: "—", style = MaterialTheme.typography.labelSmall)
                                         IconButton(
                                             enabled = runtime.controls.playback,
                                             onClick = { onSeek(track.index, 0L) },
@@ -920,18 +927,18 @@ private fun rememberBedtimeRemaining(bedtime: BedtimeRuntime): Long? {
 @Composable
 private fun rememberChapterProgress(
     playback: PlaybackRuntime,
-    fallbackDurationSeconds: Long?,
+    fallbackDurationMs: Long?,
 ): ChapterProgress? {
     val progress by produceState<ChapterProgress?>(
-        initialValue = PlaybackProgress.calculate(playback, fallbackDurationSeconds, System.currentTimeMillis()),
+        initialValue = PlaybackProgress.calculate(playback, fallbackDurationMs, System.currentTimeMillis()),
         playback.status,
         playback.updatedAt,
         playback.chapterUntilMs,
         playback.chapterDuration,
-        fallbackDurationSeconds,
+        fallbackDurationMs,
     ) {
         while (true) {
-            value = PlaybackProgress.calculate(playback, fallbackDurationSeconds, System.currentTimeMillis())
+            value = PlaybackProgress.calculate(playback, fallbackDurationMs, System.currentTimeMillis())
             if (!playback.isPlaying || value?.remainingMs == 0L) break
             delay(PLAYBACK_PROGRESS_TICK_MS)
         }
@@ -1067,7 +1074,6 @@ private fun relativeLastSeen(epochSeconds: Long): String {
     }
 }
 
-private fun formatDuration(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
 
 private fun formatCountdown(seconds: Long): String {
     val hours = seconds / 3_600

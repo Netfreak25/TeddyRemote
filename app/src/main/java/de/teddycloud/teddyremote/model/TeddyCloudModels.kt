@@ -47,6 +47,7 @@ data class PlaybackRuntime(
     val tonie: String? = null,
     val ruid: String? = null,
     val contentVersion: Long? = null,
+    val metadataRevision: String? = null,
     val chapter: Int? = null,
     val chapterUntilMs: Long? = null,
     val chapterDuration: String? = null,
@@ -121,15 +122,26 @@ data class TagInfoEnvelope(val tagInfo: JsonObject)
 data class PlaylistTrack(
     val index: Int,
     val title: String,
-    val durationSeconds: Long? = null,
+    val durationMs: Long? = null,
 )
 
 /** A response may only be applied to the exact content and connection profile that requested it. */
-data class MetadataKey(val profileId: String, val boxId: String, val ruid: String, val contentVersion: Long?) {
+data class MetadataKey(
+    val profileId: String,
+    val boxId: String,
+    val ruid: String,
+    val contentVersion: Long?,
+    val metadataRevision: String? = null,
+) {
     companion object {
         fun forBox(profileId: String, box: TonieboxDto): MetadataKey? = box.runtime.playback.ruid
             ?.takeIf { it.matches(Regex("^[0-9A-Fa-f]{16}$")) }
-            ?.let { MetadataKey(profileId, box.id.uppercase(), it.uppercase(), box.runtime.playback.contentVersion) }
+            ?.let {
+                MetadataKey(
+                    profileId, box.id.uppercase(), it.uppercase(),
+                    box.runtime.playback.contentVersion, box.runtime.playback.metadataRevision,
+                )
+            }
     }
 }
 
@@ -142,7 +154,25 @@ data class TonieMetadata(
     val playlistComplete: Boolean = false,
     val key: MetadataKey? = null,
     val introOutroPlaylist: List<PlaylistTrack>? = null,
-)
+    val metadataState: String? = null,
+    val metadataReason: String? = null,
+    val metadataRevision: String? = null,
+    val figureTitle: String? = null,
+    val figureSubtitle: String? = null,
+) {
+    /** Sum precise chapter durations first; a partial playlist has no known total. */
+    val totalDurationMs: Long?
+        get() {
+            if (!playlistComplete || playlist.isEmpty()) return null
+            var total = 0L
+            for (track in playlist) {
+                val duration = track.durationMs ?: return null
+                if (duration < 0 || duration > Long.MAX_VALUE - total) return null
+                total += duration
+            }
+            return total
+        }
+}
 
 data class BoxUiModel(
     val box: TonieboxDto,

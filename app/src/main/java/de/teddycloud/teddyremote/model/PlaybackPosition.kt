@@ -14,11 +14,11 @@ data class PlaybackPosition(
 object PlaybackPositionCalculator {
     fun calculate(
         playback: PlaybackRuntime,
-        fallbackDurationSeconds: Long?,
+        fallbackDurationMs: Long?,
         nowEpochMillis: Long,
     ): PlaybackPosition? {
         val durationMs = parseDurationMillis(playback.chapterDuration)
-            ?: fallbackDurationSeconds?.secondsToMillis()
+            ?: fallbackDurationMs
             ?: return null
         if (durationMs <= 0L) return null
 

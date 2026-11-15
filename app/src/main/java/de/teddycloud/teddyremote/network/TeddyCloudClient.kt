@@ -121,21 +121,34 @@ class TeddyCloudClient private constructor(
     suspend fun sleep(overlay: String): CommandResponse =
         parseCommand(api.sleep(overlay, "{}".toRequestBody(JSON_MEDIA)))
 
-    suspend fun getTonieMetadata(overlay: String, ruid: String, contentVersion: Long?): TonieMetadata {
+    suspend fun getTonieMetadata(
+        overlay: String,
+        ruid: String,
+        contentVersion: Long?,
+        requestedRevision: String? = null,
+    ): TonieMetadata {
         val root = networkJson.parseToJsonElement(api.getTagInfo(ruid, overlay, contentVersion).string()).jsonObject
         val tag = root["tagInfo"]?.jsonObject ?: JsonObject(emptyMap())
         val info = tag["tonieInfo"]?.jsonObject ?: JsonObject(emptyMap())
         val sourceInfo = tag["sourceInfo"]?.jsonObject ?: JsonObject(emptyMap())
         val playlist = tag["playlist"]?.jsonObject
-        val title = info.string("title")
+        val resolved = PlaylistResolver.resolve(tag, contentVersion)
+        val figureTitle = info.string("title") ?: info.string("episode") ?: tag.string("model") ?: "Tonie"
+        val legacyTitle = info.string("title")
             ?: info.string("episode")
             ?: sourceInfo.string("title")
             ?: sourceInfo.string("episode")
             ?: playlist.string("title")
             ?: tag.string("model")
             ?: "Tonie"
-        val subtitle = info.string("series") ?: sourceInfo.string("series") ?: ""
-        val resolved = PlaylistResolver.resolve(tag, contentVersion)
+        val title = if (resolved.native) {
+            if (resolved.verified) playlist.string("title") ?: figureTitle else figureTitle
+        } else legacyTitle
+        val subtitle = if (resolved.native) {
+            if (resolved.verified) playlist.string("series") ?: "" else ""
+        } else info.string("series") ?: sourceInfo.string("series") ?: ""
+        val revision = playlist.string("metadataRevision")
+        val metadataState = playlist.string("metadataState")
         return TonieMetadata(
             ruid = ruid.uppercase(),
             title = title,
@@ -144,7 +157,17 @@ class TeddyCloudClient private constructor(
             playlist = resolved.tracks,
             playlistComplete = resolved.complete,
             introOutroPlaylist = resolved.introOutroTracks,
-            key = de.teddycloud.teddyremote.model.MetadataKey(profile.id, overlay.uppercase(), ruid.uppercase(), contentVersion),
+            metadataState = if (!resolved.verified && metadataState != "pending") "unavailable" else metadataState,
+            metadataReason = if (!resolved.verified) "unverified_content_version" else playlist.string("metadataReason"),
+            metadataRevision = revision,
+            figureTitle = figureTitle,
+            figureSubtitle = info.string("series"),
+            key = de.teddycloud.teddyremote.model.MetadataKey(
+                profile.id, overlay.uppercase(), ruid.uppercase(), contentVersion,
+                // Older servers omit both revisions. A supplied request revision must
+                // agree with the actual response before it can be applied.
+                if (requestedRevision != null) revision else null,
+            ),
         )
     }
 

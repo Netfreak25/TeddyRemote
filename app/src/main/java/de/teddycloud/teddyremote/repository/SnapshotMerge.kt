@@ -10,12 +10,23 @@ internal fun mergeBoxSnapshot(
     baseline: BoxUiModel?,
     current: BoxUiModel?,
 ): BoxUiModel {
-    if (current == null) return snapshot
+    if (current == null) {
+        val key = MetadataKey.forBox(profileId, snapshot.box)
+        return snapshot.copy(metadata = snapshot.metadata?.takeIf { key != null && it.key == key })
+    }
     val live = current.box.runtime
     val old = baseline?.box?.runtime
     val remote = snapshot.box.runtime
+    val playback = if (live.playback != old?.playback) {
+        // MQTT position updates must not hide same-version metadata enrichment
+        // from HTTP. Conversely an older HTTP response cannot undo a newer revision.
+        if (live.playback.ruid.equals(remote.playback.ruid, ignoreCase = true) &&
+            live.playback.contentVersion == remote.playback.contentVersion &&
+            live.playback.metadataRevision == old?.playback?.metadataRevision
+        ) live.playback.copy(metadataRevision = remote.playback.metadataRevision) else live.playback
+    } else remote.playback
     val runtime = remote.copy(
-        playback = if (live.playback != old?.playback) live.playback else remote.playback,
+        playback = playback,
         volume = if (live.volume != old?.volume) live.volume else remote.volume,
         battery = if (live.battery != old?.battery) live.battery else remote.battery,
         headphones = if (live.headphones != old?.headphones) live.headphones else remote.headphones,

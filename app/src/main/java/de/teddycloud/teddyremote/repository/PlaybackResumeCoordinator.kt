@@ -264,7 +264,7 @@ internal class PlaybackResumeCoordinator(
         val track = model.metadata?.playlist?.firstOrNull { it.index == chapter }
         val progress = PlaybackPositionCalculator.calculate(
             playback = model.box.runtime.playback,
-            fallbackDurationSeconds = track?.durationSeconds,
+            fallbackDurationMs = track?.durationMs,
             nowEpochMillis = now,
         ) ?: return
         session.lastPosition = ObservedPosition(

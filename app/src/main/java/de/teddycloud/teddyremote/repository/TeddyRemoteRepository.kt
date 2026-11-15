@@ -274,7 +274,7 @@ class TeddyRemoteRepository(
         val metadata = metadataFor(client, requestedBox.box, requestedBox.metadata, force = true)
         updateBox(boxId, token) { model ->
             if (connectionIntent.isCurrent(token) && api === client &&
-                key == MetadataKey.forBox(client.profileId, model.box)
+                key == MetadataKey.forBox(client.profileId, model.box) && metadata?.key == key
             ) model.copy(metadata = metadata) else model
         }
     }
@@ -708,7 +708,7 @@ class TeddyRemoteRepository(
         val key = MetadataKey.forBox(client.profileId, box) ?: return null
         if (!force && existing?.key == key) return existing
         return try {
-            val metadata = client.getTonieMetadata(box.id, key.ruid, key.contentVersion)
+            val metadata = client.getTonieMetadata(box.id, key.ruid, key.contentVersion, key.metadataRevision)
             metadata.copy(pictureUrl = imageCache.materialize(metadata.pictureUrl, client))
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -718,9 +718,8 @@ class TeddyRemoteRepository(
                 ruid = key.ruid,
                 title = box.runtime.playback.tonie ?: "Tonie",
                 key = key,
-                playlist = box.runtime.playback.chapter?.let { chapter ->
-                    listOf(de.teddycloud.teddyremote.model.PlaylistTrack(chapter, "Kapitel ${chapter + 1}"))
-                } ?: emptyList(),
+                metadataState = "unavailable",
+                metadataReason = "request_failed",
             )
         }
     }

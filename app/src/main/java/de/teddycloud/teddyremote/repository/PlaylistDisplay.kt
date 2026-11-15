@@ -18,7 +18,7 @@ internal fun displayPlaylists(boxes: List<BoxUiModel>, inferIntroOutro: Boolean)
         val candidate = metadata.introOutroPlaylist ?: return@map model
         model.copy(metadata = metadata.copy(
             playlist = candidate,
-            playlistComplete = candidate.isNotEmpty() && candidate.all { it.durationSeconds != null },
+            playlistComplete = candidate.isNotEmpty() && candidate.all { it.durationMs != null },
         ))
     }
 }

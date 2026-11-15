@@ -34,7 +34,7 @@ class PlaylistDisplayTest {
         val displayed = displayPlaylists(raw, true).single()
         assertEquals(listOf("Intro", "A", "B", "Outro"), displayed.metadata?.playlist?.map { it.title })
         assertEquals(listOf(0, 1, 2, 3), displayed.metadata?.playlist?.map { it.index })
-        assertEquals(model.metadata?.playlist?.map { it.durationSeconds }, displayed.metadata?.playlist?.map { it.durationSeconds })
+        assertEquals(model.metadata?.playlist?.map { it.durationMs }, displayed.metadata?.playlist?.map { it.durationMs })
         assertEquals(model, displayed.copy(metadata = model.metadata))
         assertEquals("Figur", displayed.metadata?.title)
         assertEquals("/figur.png", displayed.metadata?.pictureUrl)
@@ -70,12 +70,12 @@ class PlaylistDisplayTest {
         runCurrent()
         val original = source.value.single()
         val missingDuration = original.copy(metadata = original.metadata!!.copy(
-            introOutroPlaylist = original.metadata.introOutroPlaylist!!.map { it.copy(durationSeconds = null) },
+            introOutroPlaylist = original.metadata.introOutroPlaylist!!.map { it.copy(durationMs = null) },
         ))
         source.value = listOf(missingDuration)
         runCurrent()
         assertFalse(seen.last().single().metadata!!.playlistComplete)
-        val other = original.copy(metadata = TonieMetadata("OTHER", "Other", playlist = listOf(PlaylistTrack(0, "New", 20))))
+        val other = original.copy(metadata = TonieMetadata("OTHER", "Other", playlist = listOf(PlaylistTrack(0, "New", 20_000))))
         source.value = listOf(other)
         runCurrent()
         assertSame(other, seen.last().single())

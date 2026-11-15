@@ -10,9 +10,9 @@ internal typealias ChapterProgress = PlaybackPosition
 internal object PlaybackProgress {
     fun calculate(
         playback: PlaybackRuntime,
-        fallbackDurationSeconds: Long?,
+        fallbackDurationMs: Long?,
         nowEpochMillis: Long,
-    ): ChapterProgress? = PlaybackPositionCalculator.calculate(playback, fallbackDurationSeconds, nowEpochMillis)
+    ): ChapterProgress? = PlaybackPositionCalculator.calculate(playback, fallbackDurationMs, nowEpochMillis)
 
     fun shifted(progress: ChapterProgress, deltaMs: Long): Long =
         (progress.positionMs + deltaMs).coerceIn(0L, progress.lastSeekableMs)

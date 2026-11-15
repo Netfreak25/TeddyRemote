@@ -198,11 +198,11 @@ class TeddyCloudClientTest {
 
         assertEquals("Original", metadata.title)
         assertEquals(listOf("Eins", "Zwei"), metadata.playlist.map { it.title })
-        assertEquals(125L, metadata.playlist[1].durationSeconds)
+        assertEquals(125_000L, metadata.playlist[1].durationMs)
     }
 
     @Test
-    fun `keeps physical tonie identity while using active source playlist`() = runTest {
+    fun `keeps figurine identity but rejects unverified old backend source chapters`() = runTest {
         server.enqueue(
             MockResponse().setBody(
                 """{"tagInfo":{"tonieInfo":{"series":"Originalserie","episode":"Originaltitel","picture":"/original.png","tracks":["Originalkapitel"]},"sourceInfo":{"series":"Eigene Serie","title":"Eigener Inhalt","picture":"/custom.png","tracks":["Eigenes Kapitel 1","Eigenes Kapitel 2"]}}}""",
@@ -212,9 +212,10 @@ class TeddyCloudClientTest {
         val metadata = client.getTonieMetadata("D4594404DEAC", "28F28F11500304E0", 43)
 
         assertEquals("Originaltitel", metadata.title)
-        assertEquals("Originalserie", metadata.subtitle)
+        assertEquals("Originalserie", metadata.figureSubtitle)
+        assertEquals("", metadata.subtitle)
         assertEquals(server.url("/original.png").toString(), metadata.pictureUrl)
-        assertEquals(listOf("Eigenes Kapitel 1", "Eigenes Kapitel 2"), metadata.playlist.map { it.title })
+        assertTrue(metadata.playlist.isEmpty())
     }
 
     @Test
@@ -228,7 +229,7 @@ class TeddyCloudClientTest {
         val metadata = client.getTonieMetadata("D4594404DEAC", "28F28F11500304E0", 44)
 
         assertEquals(listOf("Kapitel 1", "Kapitel 2", "Kapitel 3"), metadata.playlist.map { it.title })
-        assertEquals(listOf(61L, 64L, null), metadata.playlist.map { it.durationSeconds })
+        assertEquals(listOf(61_000L, 64_000L, null), metadata.playlist.map { it.durationMs })
     }
 
     @Test
@@ -256,6 +257,55 @@ class TeddyCloudClientTest {
     }
 
     @Test
+    fun `versioned native content keeps precise durations and its own title`() = runTest {
+        server.enqueue(MockResponse().setBody(
+            """{"tagInfo":{"tonieInfo":{"episode":"Figur","series":"Figurenserie"},"playlist":{"kind":"native_collection","contentVersion":42,"chapterCount":3,"title":"Neue Folgen","tracks":["A","","C"],"durations":[1.625,2.625,3.625],"metadataState":"ready","metadataRevision":"rev42"}}}""",
+        ))
+        val metadata = client.getTonieMetadata("BOX", "28F28F11500304E0", 42, "rev42")
+        assertEquals("Neue Folgen", metadata.title)
+        assertEquals("Figur", metadata.figureTitle)
+        assertEquals("Figurenserie", metadata.figureSubtitle)
+        assertEquals("", metadata.subtitle)
+        assertEquals(listOf("A", "Kapitel 2", "C"), metadata.playlist.map { it.title })
+        assertEquals(listOf(1625L, 2625L, 3625L), metadata.playlist.map { it.durationMs })
+        assertEquals(7875L, metadata.totalDurationMs)
+        assertEquals("ready", metadata.metadataState)
+        assertEquals("rev42", metadata.key?.metadataRevision)
+        assertTrue(metadata.introOutroPlaylist == null)
+    }
+
+    @Test
+    fun `incomplete native duration has no fabricated total and carries enrichment state`() = runTest {
+        server.enqueue(MockResponse().setBody(
+            """{"tagInfo":{"playlist":{"kind":"native_collection","contentVersion":42,"chapterCount":2,"durations":[1.25,null],"metadataState":"partial","metadataReason":"audio_missing","metadataRevision":"new"}}}""",
+        ))
+        val metadata = client.getTonieMetadata("BOX", "28F28F11500304E0", 42, "old")
+        assertEquals("partial", metadata.metadataState)
+        assertEquals("audio_missing", metadata.metadataReason)
+        assertEquals("new", metadata.key?.metadataRevision)
+        assertTrue(metadata.totalDurationMs == null)
+    }
+
+    @Test
+    fun `native response for another version does not advertise its titles`() = runTest {
+        server.enqueue(MockResponse().setBody(
+            """{"tagInfo":{"tonieInfo":{"episode":"Figur"},"playlist":{"kind":"native_collection","contentVersion":43,"chapterCount":2,"title":"Falsche Fassung","tracks":["A","B"]}}}""",
+        ))
+        val metadata = client.getTonieMetadata("BOX", "28F28F11500304E0", 42)
+        assertTrue(metadata.playlist.isEmpty())
+        assertEquals("Figur", metadata.title)
+        assertEquals("unavailable", metadata.metadataState)
+    }
+
+    @Test
+    fun `runtime carries an additive metadata revision`() = runTest {
+        server.enqueue(MockResponse().setBody(
+            """{"boxes":[{"ID":"BOX","runtime":{"playback":{"ruid":"28F28F11500304E0","contentVersion":42,"metadataRevision":"enriched"}}}]}""",
+        ))
+        assertEquals("enriched", client.getBoxes().boxes.single().runtime.playback.metadataRevision)
+    }
+
+    @Test
     fun `returns normal and inferred playlist from the same single API response`() = runTest {
         server.enqueue(MockResponse().setBody(
             """{"tagInfo":{"tonieInfo":{"episode":"Figur","picture":"/original.png"},"sourceInfo":{"tracks":["A","B"]},"trackSeconds":[0,10,70,140],"totalSeconds":150}}""",
@@ -264,7 +314,7 @@ class TeddyCloudClientTest {
         assertEquals("Figur", metadata.title)
         assertEquals(listOf("A", "B", "Kapitel 3", "Kapitel 4"), metadata.playlist.map { it.title })
         assertEquals(listOf("Intro", "A", "B", "Outro"), metadata.introOutroPlaylist?.map { it.title })
-        assertEquals(listOf(10L, 60L, 70L, 10L), metadata.introOutroPlaylist?.map { it.durationSeconds })
+        assertEquals(listOf(10_000L, 60_000L, 70_000L, 10_000L), metadata.introOutroPlaylist?.map { it.durationMs })
         assertEquals(1, server.requestCount)
     }
 }

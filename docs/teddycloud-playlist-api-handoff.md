@@ -1,5 +1,39 @@
 # Auftrag: Gesamtdauer für die TeddyRemote-Kapitelliste bereitstellen
 
+## Ergänzung: versionsgebundene native Metadaten
+
+Für native V3-Inhalte verwendet TeddyRemote `playlist.kind = "native_collection"`
+und ausschließlich eine zur angefragten `contentVersion` passende Playlist. Eine
+fehlende oder abweichende Version liefert keine scheinbar passenden Kapitel aus
+dem Figurenmodell. `chapterCount` bestimmt die Anzahl; fehlende Anzahl bedeutet
+unbekannt. Leere Namen werden positionsgetreu als `Kapitel N` dargestellt. Die
+optionale Intro-/Outro-Heuristik gilt nicht für native Playlists.
+
+`playlist.durations` enthält Sekunden als JSON-Zahlen (auch Dezimalwerte) oder
+`null`. Intern werden Millisekunden verwendet; unbekannte Dauern erscheinen als
+`—`. Eine Gesamtzeit wird erst bei vollständig bekannten Dauern summiert und für
+die Anzeige gekürzt. Die von der Box gemeldeten `chapterDuration` und
+`chapterUntilMs` bleiben für die laufende Positionsrechnung vorrangig. TAF-Starts
+und `totalSeconds` behalten die unten beschriebene Differenzrechnung.
+
+Die optionalen Felder `metadataState`, `metadataReason` und `metadataRevision`
+werden aus `playlist` übernommen. `runtime.playback.metadataRevision` ist eine
+undurchsichtige Zeichenfolge und Bestandteil des lokalen Metadatenschlüssels
+(Profil, Box, RUID, Version, Revision). Das bestehende Boxpolling erkennt damit
+nachgelieferte Informationen derselben Version; es gibt keine zusätzliche
+Cloudabfrage. Verspätete Antworten müssen weiterhin zur aktuellen Identität und
+Revision passen, auch wenn MQTT währenddessen Kapitel/Position aktualisiert hat.
+
+Inhaltstitel der bestätigten nativen Playlist haben Vorrang. Figurenname und
+Figurenserie bleiben als separate Modelldaten erhalten. Ältere Backends ohne die
+zusätzlichen Felder bleiben für TAF/TAP unterstützt; fehlende native Struktur
+wird nicht aus Figuren-Kapiteln erfunden. Der Client löst durch Metadatenupdates
+keine Wiedergabe-, Freshness- oder Sourcebefehle aus.
+
+Gezielte Verifikation umfasst Resolver/API, Revisionsrennen, Dezimaldauern,
+Gesamtsummen und bestehende Pause-/Seek-/Resume-Positionsrechnung. Ein erfolgreicher
+JVM-Test/Kotlin-Build ersetzt keine Android-/Box-Hardwareabnahme.
+
 Diese Anleitung ist für die LLM im **TeddyCloud-Projekt**. Im Android-Auftrag wurde kein TeddyCloud-Code verändert. Prüfe zuerst die Regeln und den tatsächlichen Stand deines eigenen Checkouts.
 
 ## Problem und Schnittstelle
