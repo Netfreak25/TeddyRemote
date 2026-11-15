@@ -51,12 +51,17 @@ class NetworkMonitor(context: Context) {
 
     /** Pins all sockets in this app process to the currently active Wi-Fi network. */
     fun bindToActiveWifi(): Boolean {
-        if (gate() != WifiGateState.AVAILABLE) return false
-        val network = connectivityManager.activeNetwork ?: return false
-        if (snapshotNetwork != network) return false
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return false
+        val network = activeWifiNetwork() ?: return false
         return connectivityManager.bindProcessToNetwork(network)
+    }
+
+    /** Allows a dedicated client to bind sockets/DNS without changing the app's connection. */
+    fun activeWifiNetwork(): Network? {
+        if (gate() != WifiGateState.AVAILABLE) return null
+        val network = connectivityManager.activeNetwork ?: return null
+        if (snapshotNetwork != network) return null
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return null
+        return network.takeIf { capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) }
     }
 
     fun releaseBinding() {

@@ -1,6 +1,8 @@
 package de.teddycloud.teddyremote.ui
 
 import android.content.Intent
+import androidx.core.net.toUri
+import android.provider.Settings
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -28,6 +30,8 @@ fun TeddyRemoteApp(
     viewModel: MainViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val update by viewModel.updateState.collectAsStateWithLifecycle()
+    val updateWifi by viewModel.updateWifi.collectAsStateWithLifecycle()
     val context = LocalContext.current
     TeddyRemoteTheme(state.profiles.themeMode) {
         val showNavigation = !state.needsOnboarding && state.screen in setOf(
@@ -92,6 +96,19 @@ fun TeddyRemoteApp(
                         onTonieAutoResume = viewModel::setTonieAutoResume,
                         onDiagnostics = { viewModel.navigate(AppScreen.DIAGNOSTICS) },
                         onOpenMqttGuide = { openMqttGuide(context) },
+                        updates = {
+                            UpdateCard(update, updateWifi.wifiAvailable,
+                                viewModel::checkForUpdate, viewModel::downloadUpdate, viewModel::installUpdate,
+                                viewModel::cancelUpdate, viewModel::cancelUpdateInstallation,
+                                onPermission = {
+                                    try {
+                                        context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:${context.packageName}".toUri()))
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Installationsfreigabe konnte nicht geöffnet werden.", Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                            )
+                        },
                     )
                     else -> HomeScreen(
                         state = state,

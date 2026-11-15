@@ -141,6 +141,7 @@ fun SettingsScreen(
     onTonieAutoResume: (String, Boolean) -> Unit,
     onDiagnostics: () -> Unit,
     onOpenMqttGuide: () -> Unit,
+    updates: @Composable () -> Unit = {},
 ) {
     var pendingDelete by remember { mutableStateOf<ConnectionProfile?>(null) }
     Column(Modifier.fillMaxSize()) {
@@ -233,6 +234,7 @@ fun SettingsScreen(
                 }
             }
 
+            updates()
             PlaybackHistorySettings(state, onResumeOfferTimeout, onTonieAutoResume)
 
             Text("Anleitungen", style = MaterialTheme.typography.titleLarge)

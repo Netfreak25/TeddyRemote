@@ -124,6 +124,15 @@ Fehlt die externe Release-Konfiguration, signiert Gradle den lokalen Release-Bui
 
 ## Entwicklungsstatus
 
+### 0.1.33
+
+- **Einstellungen → Updates** prüft auf Knopfdruck die neueste reguläre GitHub-Release von `Netfreak25/TeddyRemote`. Es gibt keine automatische Suche, keinen Hintergrunddienst und keine automatischen Installationen.
+- Nur die eindeutig zugehörige Release-APK wird angeboten. Download über WLAN mit normaler HTTPS-Zertifikatsprüfung; vollständige Größe und eine vorhandene GitHub-SHA-256-Prüfsumme werden geprüft. Vor Installation müssen Paketname, höhere Versionsnummer, Release-Status und Signaturidentität zur installierten App passen.
+- Nach **Herunterladen** folgt **Installieren** und die Bestätigung im Android-Systemdialog. Falls nötig, zuerst **Installation erlauben** freigeben und danach nochmals **Installieren** wählen. Bestehende App-Daten bleiben bei einem Update erhalten. Android prüft die APK zusätzlich; Ablehnung und Abbruch werden angezeigt.
+- Debug-Installationen sind vom Updater ausgeschlossen. Suche und Download benötigen WLAN, aber keine aktive TeddyCloud-Verbindung. Abgebrochene Downloads werden nicht fortgesetzt; temporäre Update-Dateien werden bei der nächsten Prüfung bereinigt.
+
+Technische Grundlagen: [GitHub Releases API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release), [Android PackageInstaller](https://developer.android.com/reference/android/content/pm/PackageInstaller.SessionParams#setRequireUserAction(int)). Die Installationsfreigabe und der echte Systemdialog erfordern eine separate Geräteabnahme; ein erfolgreicher Build ersetzt diese nicht.
+
 ### 0.1.32
 
 - Beim MQTT-Wechsel der RUID oder Contentversion wird die Metadatenrevision des vorherigen Inhalts verworfen. Die passende neue Playlist kann direkt übernommen werden, ohne auf den nächsten Box-Zustandsabgleich zu warten. Wiederholte Identitätsmeldungen und Kapitelwechsel behalten die aktuelle Revision.

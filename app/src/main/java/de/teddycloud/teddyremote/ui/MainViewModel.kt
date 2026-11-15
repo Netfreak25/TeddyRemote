@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import de.teddycloud.teddyremote.AppContainer
+import de.teddycloud.teddyremote.BuildConfig
+import de.teddycloud.teddyremote.updates.UpdateController
 import de.teddycloud.teddyremote.model.BoxUiModel
 import de.teddycloud.teddyremote.model.CertificateCandidate
 import de.teddycloud.teddyremote.model.CertificateTarget
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -37,6 +40,28 @@ data class MainUiState(
 }
 
 class MainViewModel(private val container: AppContainer) : ViewModel() {
+    private val updater = UpdateController(viewModelScope, container.updateOperations, container.apkInstaller.status, !BuildConfig.DEBUG)
+    val updateState = updater.state
+    val updateConfirmation = container.apkInstaller.confirmation
+    val updateWifi = container.networkMonitor.state
+
+    init {
+        viewModelScope.launch {
+            updateWifi.collect { if (!it.wifiAvailable) updater.cancelNetwork("WLAN-Verbindung verloren. Download bitte erneut starten.") }
+        }
+    }
+
+    fun checkForUpdate() = updater.check()
+    fun downloadUpdate() = updater.download()
+    fun installUpdate() = updater.install()
+    fun cancelUpdate() = updater.cancelNetwork()
+    fun cancelUpdateInstallation() = updater.cancelInstallation()
+    fun refreshUpdatePermission() = updater.refreshPermission()
+    fun updateConfirmationShown() = container.apkInstaller.confirmationShown()
+    fun updateConfirmationFailed() = container.apkInstaller.fail("Android-Installationsdialog konnte nicht geöffnet werden.")
+
+    override fun onCleared() { updater.close(); super.onCleared() }
+
     private val transient = MutableStateFlow(TransientState())
     private val profileEditorController = ProfileEditorController(
         scope = viewModelScope,
@@ -80,6 +105,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     fun navigate(screen: AppScreen) {
+        if (screen != AppScreen.SETTINGS) updater.cancelNetwork()
         if (screen != AppScreen.PROFILE_EDITOR) {
             profileLoadJob?.cancel()
             profileLoadJob = null

@@ -10,6 +10,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import de.teddycloud.teddyremote.service.TeddyRemoteService
 import de.teddycloud.teddyremote.ui.MainViewModel
@@ -38,6 +40,22 @@ class MainActivity : ComponentActivity() {
         setContent {
             TeddyRemoteApp(viewModel = viewModel)
         }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                viewModel.updateConfirmation.collect { confirmation ->
+                    if (confirmation != null) {
+                        viewModel.updateConfirmationShown()
+                        try { startActivity(confirmation) }
+                        catch (_: Exception) { viewModel.updateConfirmationFailed() }
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshUpdatePermission()
     }
 
     override fun onNewIntent(intent: Intent) {

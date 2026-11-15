@@ -2,8 +2,10 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="teddyremote.secrets.xml" />
+        <exclude domain="sharedpref" path="update-install.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="teddyremote.secrets.xml" />
+        <exclude domain="sharedpref" path="update-install.xml" />
     </device-transfer>
 </data-extraction-rules>
